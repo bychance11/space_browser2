@@ -44,7 +44,7 @@
   <input id="speed" type="range" min="1" max="40" value="5" />
 </div>
 <div id="status">데이터 불러오는 중…</div>
-<div id="playhint" style="position:fixed; left:0; right:0; bottom:42px; z-index:5; text-align:center; font-size:14px; color:#cdd9ff; pointer-events:none; opacity:1; transition:opacity .6s; text-shadow:0 0 8px rgba(0,0,0,.9);">⏸ <b>스페이스바를 누르고 있으면</b> 별이 진행합니다</div>
+<div id="playhint" style="position:fixed; left:0; right:0; bottom:42px; z-index:5; text-align:center; font-size:14px; color:#cdd9ff; pointer-events:none; opacity:1; transition:opacity .6s; text-shadow:0 0 8px rgba(0,0,0,.9);">⏸ <b>스페이스바 또는 화면을 누르고 있으면</b> 별이 진행합니다 (짧게 누르면 문서 열기)</div>
 
 <div id="post">
   <div class="card">
@@ -86,7 +86,7 @@ function resize() {
   skylineH = H * 0.1;                 // 도시 지평선 높이 ≈ 세로 1/10
   horizonY = H - skylineH - H * 0.05; // 별이 뜨고 지는 지평선 라인
   arcAmp = H * 0.5;                   // 천정까지 들어올리는 곡률(자전축 효과)
-  laneH = H * 0.15;                   // 레인 세로 폭
+  laneH = H * 0.27;                   // 레인 세로 폭(상하 분포 넓힘)
   buildSkyline();
 }
 resize(); addEventListener("resize", resize);
@@ -178,7 +178,7 @@ async function loadData() {
 let DATA = [], dataIdx = 0, mains = [];
 function makeMain(d) {
   const maxU = 1.0;                              // 모두 서쪽 끝까지 흐른다 (중간 소멸 없음)
-  const life = 10 + Math.pow(d.weight, 2.5) * 220; // 핫할수록 수명 급격히↑ (가장 핫=수분, 시덥잖음=수초)
+  const life = (10 + Math.pow(d.weight, 2.5) * 220) * (0.55 + Math.random() * 0.9); // 핫할수록 수명↑ + 별마다 속도 편차 ±로 적체 방지
   const color = PALETTE[Math.floor(rand(0, PALETTE.length))];
   const sats = (d.related || []).slice(0, 5).map((title, i) => ({
     title, bind: clamp(1 - i * 0.19, 0.1, 1),
@@ -202,7 +202,7 @@ function spawnNext() {
 function flowXY(u, ly, bobPhase, bobAmp, t) {
   const u01 = clamp(u, 0, 1);
   const arc = Math.sin(Math.PI * u01);               // 0(지평선)→1(천정)→0(지평선)
-  const env = Math.pow(arc, 0.55);                   // 지평선 근처일수록 레인이 좁아짐(수렴)
+  const env = 0.5 + 0.5 * Math.pow(arc, 0.55);       // 입구에서도 위아래로 벌어지게(한 점 수렴 방지)
   const x = W * 1.08 - u * (W * 1.22);
   const centerY = horizonY - arcAmp * arc;           // 곡률(자전축 효과)
   const y = centerY + ly * laneH * env + Math.sin(t * 0.5 + bobPhase) * bobAmp * 0.5;
@@ -326,21 +326,39 @@ function drawSkyline() {
   }
 }
 
-// ---------- 클릭 → 문서 열기 ----------
+// ---------- 입력: 스페이스바 / 마우스 / 터치 (누르고 있으면 진행, 짧게 누르면 문서 열기) ----------
 const postEl = document.getElementById("post");
-cv.addEventListener("click", e => {
+const playhint = document.getElementById("playhint");
+cv.style.touchAction = "none";
+let spaceHeld = false, pointerHeld = false;
+function playing() { return spaceHeld || pointerHeld; }
+function updateHint() { playhint.style.opacity = playing() ? "0" : "1"; }
+
+addEventListener("keydown", e => {
+  if (e.code === "Escape") postEl.style.display = "none";
+  if (e.code === "Space" && !e.repeat) { spaceHeld = true; updateHint(); e.preventDefault(); }
+});
+addEventListener("keyup", e => { if (e.code === "Space") { spaceHeld = false; updateHint(); } });
+
+let downX = 0, downY = 0, downT = 0, moved = false;
+cv.addEventListener("pointerdown", e => { pointerHeld = true; downX = e.clientX; downY = e.clientY; downT = performance.now(); moved = false; updateHint(); });
+cv.addEventListener("pointermove", e => { if (pointerHeld && Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY) > 8) moved = true; });
+cv.addEventListener("pointerup", e => { if (!pointerHeld) return; pointerHeld = false; updateHint(); if (!moved && performance.now() - downT < 300) openAt(e.clientX, e.clientY); });
+cv.addEventListener("pointercancel", () => { pointerHeld = false; updateHint(); });
+
+function openAt(cx, cy) {
   let best = null, bd = Infinity, isSat = false, parent = null;
   for (const m of mains) {
-    let d = (e.clientX - m.sx) ** 2 + (e.clientY - m.sy) ** 2;
+    let d = (cx - m.sx) ** 2 + (cy - m.sy) ** 2;
     let hitR = Math.max(16, mainRadius(m) * 2.5);
     if (d < hitR * hitR && d < bd) { bd = d; best = m; isSat = false; }
     for (const s of m.sats) {
-      d = (e.clientX - s.sx) ** 2 + (e.clientY - s.sy) ** 2;
+      d = (cx - s.sx) ** 2 + (cy - s.sy) ** 2;
       if (d < 18 * 18 && d < bd) { bd = d; best = s; isSat = true; parent = m; }
     }
   }
   if (best) openPost(best, isSat, parent);
-});
+}
 function openPost(o, isSat, parent) {
   document.getElementById("p-tag").textContent = isSat ? ("연관 문서 · 〈" + parent.title + "〉의 위성") : (o.weight > 0.85 ? "문서 · 🔥 초신성급 화제" : "문서");
   document.getElementById("p-title").textContent = o.title;
@@ -351,20 +369,11 @@ function openPost(o, isSat, parent) {
 }
 postEl.addEventListener("click", () => postEl.style.display = "none");
 
-// ---------- 스페이스바: 누르고 있는 동안만 진행 (떼면 정지) ----------
-let playing = false;
-const playhint = document.getElementById("playhint");
-addEventListener("keydown", e => {
-  if (e.code === "Escape") postEl.style.display = "none";
-  if (e.code === "Space" && !e.repeat) { playing = true; playhint.style.opacity = "0"; e.preventDefault(); }
-});
-addEventListener("keyup", e => { if (e.code === "Space") { playing = false; playhint.style.opacity = "1"; } });
-
 // ---------- 시작 ----------
 let clock = 0, lastNow = performance.now();
 function loop(now) {
   const real = Math.min(0.05, (now - lastNow) / 1000); lastNow = now;
-  if (playing) { const dt = real * timeScale / SLOW; clock += dt; update(dt, clock); }
+  if (playing()) { const dt = real * timeScale / SLOW; clock += dt; update(dt, clock); }
   draw(clock);
   requestAnimationFrame(loop);
 }

@@ -35,7 +35,7 @@
   <div>연관 문서를 <b>중력</b>으로 끌고 다님</div>
 </div>
 <div id="zoom">×1.0</div>
-<div id="hint">한 손가락 <b>누르면 진행</b> · 떼면 정지 · 두 손가락 확대 · 톡 치면 문서 열기</div>
+<div id="hint">손가락/마우스/스페이스바 <b>누르면 진행</b> · 떼면 정지 · 두 손가락 확대 · 톡 치면 문서 열기</div>
 <div id="status">데이터 불러오는 중…</div>
 
 <div id="post">
@@ -77,7 +77,7 @@ function buildSkyline() {
 function resize() {
   W = cv.width = innerWidth; H = cv.height = innerHeight;
   skylineH = H * 0.1; horizonY = H - skylineH - H * 0.05;
-  arcAmp = H * 0.5; laneH = H * 0.15; buildSkyline();
+  arcAmp = H * 0.5; laneH = H * 0.30; buildSkyline(); // 레인 폭 넓힘(상하 분포)
 }
 resize(); addEventListener("resize", resize);
 
@@ -154,7 +154,7 @@ async function loadData() {
 // ---------- 별/위성 ----------
 let DATA = [], dataIdx = 0, mains = [];
 function makeMain(d) {
-  const life = 10 + Math.pow(d.weight, 2.5) * 220; // 핫할수록 수명 급격히↑
+  const life = (10 + Math.pow(d.weight, 2.5) * 220) * (0.55 + Math.random() * 0.9); // 수명↑ + 속도 편차로 적체 방지
   const color = PALETTE[Math.floor(rand(0, PALETTE.length))];
   const sats = (d.related || []).slice(0, 5).map((title, i) => ({
     title, bind: clamp(1 - i * 0.19, 0.1, 1), ang: rand(0, 6.28), orbitR: 24 + i * 16,
@@ -168,7 +168,7 @@ function spawnNext() { if (DATA.length) { mains.push(makeMain(DATA[dataIdx % DAT
 // 세로 화면용: 남동(우하) → 북서(좌상) 거의 선형 대각선 흐름 (동/서 개념 대신)
 function flowXY(u, ly, bobPhase, bobAmp, t) {
   const u01 = clamp(u, 0, 1);
-  const env = Math.pow(Math.sin(Math.PI * u01), 0.4);          // 양 끝에서 레인 약간 수렴
+  const env = 0.5 + 0.5 * Math.pow(Math.sin(Math.PI * u01), 0.4); // 입구에서도 위아래로 벌어지게(수렴 방지)
   const x = W * 1.10 - u * (W * 1.28);                         // 오른쪽 밖 → 왼쪽 밖
   const y = H * 1.10 - u * (H * 1.28);                         // 아래쪽 밖 → 위쪽 밖
   const off = ly * laneH * env;                               // 대각선에 수직으로 레인 분산
@@ -354,11 +354,19 @@ function openPost(o, isSat, parent) {
 }
 postEl.addEventListener("click", () => postEl.style.display = "none");
 
+// 데스크톱/키보드 호환: 스페이스바·마우스도 터치와 동일하게 동작
+let spaceHeld = false, mouseHeld = false, mDownX = 0, mDownY = 0, mDownT = 0, mMoved = false;
+addEventListener("keydown", e => { if (e.code === "Escape") postEl.style.display = "none"; if (e.code === "Space" && !e.repeat) { spaceHeld = true; e.preventDefault(); } });
+addEventListener("keyup", e => { if (e.code === "Space") spaceHeld = false; });
+cv.addEventListener("mousedown", e => { const p = getTouchPos(e); mouseHeld = true; mDownX = p.x; mDownY = p.y; mDownT = performance.now(); mMoved = false; });
+addEventListener("mousemove", e => { if (mouseHeld) { const p = getTouchPos(e); if (Math.abs(p.x - mDownX) + Math.abs(p.y - mDownY) > 8) mMoved = true; } });
+addEventListener("mouseup", e => { if (!mouseHeld) return; mouseHeld = false; const p = getTouchPos(e); if (!mMoved && performance.now() - mDownT < 300) tapOpen(p.x, p.y); });
+
 // ---------- 루프 ----------
 let clock = 0, lastNow = performance.now();
 function loop(now) {
   const real = Math.min(0.05, (now - lastNow) / 1000); lastNow = now;
-  if (playing) { const dt = real * timeScale / SLOW; clock += dt; update(dt, clock); }
+  if (playing || spaceHeld || mouseHeld) { const dt = real * timeScale / SLOW; clock += dt; update(dt, clock); }
   draw(clock);
   requestAnimationFrame(loop);
 }
