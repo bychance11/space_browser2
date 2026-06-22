@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Space Browser — 실시간 (Hacker News)</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: -apple-system, "Segoe UI", "Noto Sans KR", sans-serif; color: #fff; }
+  #c { display: block; width: 100%; height: 100%; }
+
+  #crosshair { position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 22px; height: 22px; pointer-events: none; z-index: 5; opacity: .85; }
+  #crosshair::before, #crosshair::after { content: ""; position: absolute; background: rgba(255,255,255,.9); }
+  #crosshair::before { left: 50%; top: 0; width: 1px; height: 100%; transform: translateX(-50%); }
+  #crosshair::after  { top: 50%; left: 0; height: 1px; width: 100%; transform: translateY(-50%); }
+
+  #start { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; background: radial-gradient(circle at 50% 40%, rgba(20,24,60,.85), rgba(0,0,0,.95)); cursor: pointer; transition: opacity .4s; }
+  #start h1 { font-size: 30px; margin: 0 0 6px; letter-spacing: 1px; }
+  #start p { margin: 4px 0; color: #b9c2e0; font-size: 15px; line-height: 1.7; }
+  #start .keys { margin-top: 18px; font-size: 13px; color: #8b94b8; }
+  #start .go { margin-top: 26px; padding: 12px 28px; border: 1px solid #5a6cff; border-radius: 999px; color: #cdd5ff; font-size: 15px; background: rgba(90,108,255,.12); }
+  #start .status { margin-top: 16px; font-size: 13px; color: #6f79a8; }
+
+  #hud { position: fixed; left: 16px; bottom: 14px; z-index: 5; font-size: 12.5px; color: #93b4ff; pointer-events: none; line-height: 1.6; text-shadow: 0 0 6px rgba(0,0,0,.8); }
+  #hud b { color: #fff; font-weight: 600; }
+
+  #post { position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center; background: rgba(2,4,12,.72); backdrop-filter: blur(4px); }
+  #post .card { width: min(580px, 88vw); background: linear-gradient(180deg,#11142a,#0a0c1a); border: 1px solid rgba(120,140,255,.35); border-radius: 16px; padding: 26px 28px; box-shadow: 0 0 60px rgba(80,110,255,.25); }
+  #post .tag { font-size: 12px; color: #7f8cc4; letter-spacing: .5px; }
+  #post h2 { margin: 8px 0 14px; font-size: 21px; line-height: 1.4; }
+  #post .stats { display: flex; gap: 22px; margin: 6px 0 18px; }
+  #post .stats div { font-size: 13px; color: #aeb6da; }
+  #post .stats b { display: block; font-size: 22px; color: #fff; margin-top: 2px; }
+  #post .links { display: flex; gap: 12px; margin-top: 8px; }
+  #post a { display: inline-block; padding: 9px 16px; border-radius: 9px; text-decoration: none; font-size: 13.5px;
+    background: rgba(90,108,255,.16); border: 1px solid rgba(120,140,255,.4); color: #cdd5ff; }
+  #post a:hover { background: rgba(90,108,255,.3); }
+  #post .hint { margin-top: 18px; font-size: 12.5px; color: #6f79a8; }
+  #post .hint kbd { background: #1c2142; border: 1px solid #39406e; border-radius: 5px; padding: 1px 7px; color: #cdd5ff; font-size: 12px; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="crosshair"></div>
+
+<div id="hud">
+  <div>현재 위치: <b id="loc">우주 공간</b></div>
+  <div>거리 단위: <b>1 DT</b> = 1초 직진 거리 · 행성간 평균: <b id="gap">– DT</b></div>
+  <div>WASD 이동 · 마우스 시점 · <b>Space/Shift</b> 상하 · <b>휠</b> 속도 · <b>클릭</b> 별/광고 · <b>ESC</b> 복귀</div>
+</div>
+
+<div id="start">
+  <h1>🌌 Space Browser <span style="font-size:15px;color:#7f8cc4">· Hacker News 실시간</span></h1>
+  <p>실제 Hacker News 글을 우주의 별로 표시합니다</p>
+  <p style="color:#7f8cc4;font-size:13px">추천(points) = 밝기 · 댓글수 = 크기 · 게시판 = 태양계</p>
+  <div class="keys">WASD 이동 | 마우스 시점 | 중앙 조준 후 클릭 | ESC 복귀</div>
+  <div class="go" id="goBtn">데이터 불러오는 중…</div>
+  <div class="status" id="statusMsg"></div>
+</div>
+
+<div id="post">
+  <div class="card">
+    <div class="tag" id="p-tag">BOARD</div>
+    <h2 id="p-title">제목</h2>
+    <div class="stats">
+      <div>추천(points)<b id="p-points">0</b></div>
+      <div>댓글수<b id="p-comments">0</b></div>
+    </div>
+    <div class="links">
+      <a id="p-link" href="#" target="_blank" rel="noopener">원문 보기 ↗</a>
+      <a id="p-thread" href="#" target="_blank" rel="noopener">토론 보기 ↗</a>
+    </div>
+    <div class="hint"><kbd>ESC</kbd> 또는 빈 곳 클릭하여 우주로 돌아가기</div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ============================================================
+//  Space Browser — 실시간 버전
+//  데이터 출처: Hacker News (hn.algolia.com 공개 API, 인증 불필요, CORS 허용)
+//  → 사용자의 브라우저가 직접 불러옵니다. 서버 불필요.
+// ============================================================
+
+function rand(a, b) { return a + Math.random() * (b - a); }
+
+// ---------- 게시판(태양계) 정의 : HN 검색 통로 ----------
+const API = "https://hn.algolia.com/api/v1/";
+const BOARDS = [
+  { name: "Front Page", q: "search?tags=front_page",       color: [1.0, 0.62, 0.42] },
+  { name: "Show HN",    q: "search?tags=show_hn",          color: [0.5, 0.78, 1.0] },
+  { name: "Ask HN",     q: "search?tags=ask_hn",           color: [0.7, 1.0, 0.75] },
+  { name: "AI 토픽",    q: "search?query=AI&tags=story",   color: [1.0, 0.6, 0.9] },
+];
+
+// 오프라인/차단 시 폴백용 최소 데이터 (네트워크 안 될 때도 데모가 비지 않게)
+const FALLBACK = [
+  { board:"Front Page", title:"(오프라인) 샘플 글 1", points:820, num_comments:340, objectID:"1", url:"" },
+  { board:"Front Page", title:"(오프라인) 샘플 글 2", points:120, num_comments:45, objectID:"2", url:"" },
+  { board:"Show HN", title:"(오프라인) Show HN 샘플", points:300, num_comments:90, objectID:"3", url:"" },
+  { board:"Ask HN", title:"(오프라인) Ask HN 샘플", points:60, num_comments:210, objectID:"4", url:"" },
+  { board:"AI 토픽", title:"(오프라인) AI 샘플", points:1500, num_comments:600, objectID:"5", url:"" },
+];
+
+// ---------- 거리 단위 DT ----------
+const DT = 12 * 60; // 1 DT = 1초 직진 거리 ≈ 720 월드 단위
+
+// ---------- 배치 알고리즘 (게시판=태양계) ----------
+function placeBoards(center, n) {
+  return Array.from({ length: n }, (_, i) => {
+    const a = (i / n) * Math.PI * 2 + rand(-0.3, 0.3);
+    const r = rand(1100, 2000);
+    return [center[0] + Math.cos(a) * r, center[1] + rand(-400, 400), center[2] + Math.sin(a) * r];
+  });
+}
+function placePost(boardCenter, popularity) {
+  const arm = rand(0, Math.PI * 2);
+  const dist = (1 - popularity) * rand(120, 700) + 60;
+  const ang = arm + dist * 0.012;
+  return [
+    boardCenter[0] + Math.cos(ang) * dist + rand(-40, 40),
+    boardCenter[1] + rand(-90, 90),
+    boardCenter[2] + Math.sin(ang) * dist + rand(-40, 40),
+  ];
+}
+
+// ---------- 데이터 로딩 ----------
+async function fetchBoard(b) {
+  const url = API + b.q + "&hitsPerPage=45";
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  const j = await res.json();
+  return (j.hits || []).filter(h => h.title).map(h => ({ ...h, board: b.name, color: b.color }));
+}
+
+async function loadPosts() {
+  const galaxyCenter = [0, 0, 0];
+  const boardCenters = placeBoards(galaxyCenter, BOARDS.length);
+  let raw = [];
+  try {
+    const results = await Promise.all(BOARDS.map(fetchBoard));
+    results.forEach((hits, bi) => hits.forEach(h => h._bi = bi) || raw.push(...hits));
+    if (!raw.length) throw new Error("빈 응답");
+  } catch (e) {
+    console.warn("실시간 로딩 실패 → 폴백 사용:", e);
+    raw = FALLBACK.map(h => ({ ...h, color: (BOARDS.find(b=>b.name===h.board)||BOARDS[0]).color,
+                               _bi: BOARDS.findIndex(b=>b.name===h.board) }));
+    window.__offline = true;
+  }
+  // 좌표 부여
+  return raw.map(h => {
+    const popularity = Math.min(1, (h.points || 0) / 800);
+    return {
+      board: h.board, color: h.color,
+      title: h.title, points: h.points || 0, comments: h.num_comments || 0,
+      supernova: (h.points || 0) > 1000,
+      url: h.url || ("https://news.ycombinator.com/item?id=" + h.objectID),
+      thread: "https://news.ycombinator.com/item?id=" + h.objectID,
+      pos: placePost(boardCenters[h._bi < 0 ? 0 : h._bi], popularity),
+    };
+  });
+}
+
+// ---------- Three.js 기본 세팅 ----------
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x05060f, 0.000045);
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 1, 200000);
+camera.position.set(0, 200, 4500);
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("c"), antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.setClearColor(0x02030a, 1);
+
+// 배경 별먼지
+(function dust() {
+  const N = 4000, p = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    const r = rand(12000, 60000), t = rand(0, Math.PI * 2), ph = Math.acos(rand(-1, 1));
+    p[i*3] = r*Math.sin(ph)*Math.cos(t); p[i*3+1] = r*Math.sin(ph)*Math.sin(t); p[i*3+2] = r*Math.cos(ph);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(p, 3));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0x556099, size: 2, sizeAttenuation: false })));
+})();
+
+function glowTexture() {
+  const s = 64, cv = document.createElement("canvas"); cv.width = cv.height = s;
+  const ctx = cv.getContext("2d");
+  const g = ctx.createRadialGradient(s/2,s/2,0,s/2,s/2,s/2);
+  g.addColorStop(0,"rgba(255,255,255,1)"); g.addColorStop(0.25,"rgba(255,255,255,0.85)");
+  g.addColorStop(0.55,"rgba(160,180,255,0.25)"); g.addColorStop(1,"rgba(0,0,0,0)");
+  ctx.fillStyle = g; ctx.fillRect(0,0,s,s);
+  const t = new THREE.Texture(cv); t.needsUpdate = true; return t;
+}
+
+// ---------- 광고 푯말 (우주쓰레기) ----------
+const ADS = [
+  { text:"AD · 신작 게임 출시!", sub:"지금 플레이 ▶", bg:"#2a1840", url:"https://example.com/ad1" },
+  { text:"AD · 우주 여행 특가", sub:"예약하기 ▶",   bg:"#0e2a3a", url:"https://example.com/ad2" },
+  { text:"AD · 별 분양 이벤트", sub:"자세히 ▶",     bg:"#3a200e", url:"https://example.com/ad3" },
+];
+function bannerTexture(ad) {
+  const w=512,h=256,cv=document.createElement("canvas"); cv.width=w; cv.height=h;
+  const ctx=cv.getContext("2d");
+  ctx.fillStyle=ad.bg; ctx.strokeStyle="rgba(255,255,255,.55)"; ctx.lineWidth=8;
+  ctx.beginPath(); ctx.roundRect(14,14,w-28,h-28,24); ctx.fill(); ctx.stroke();
+  ctx.fillStyle="rgba(255,255,255,.3)";
+  [[40,40],[w-40,40],[40,h-40],[w-40,h-40]].forEach(([x,y])=>{ctx.beginPath();ctx.arc(x,y,7,0,7);ctx.fill();});
+  ctx.textAlign="center"; ctx.fillStyle="#fff";
+  ctx.font="bold 44px -apple-system,'Noto Sans KR',sans-serif"; ctx.fillText(ad.text,w/2,h/2-6);
+  ctx.font="26px -apple-system,'Noto Sans KR',sans-serif"; ctx.fillStyle="rgba(255,255,255,.85)"; ctx.fillText(ad.sub,w/2,h/2+46);
+  const t=new THREE.Texture(cv); t.needsUpdate=true; return t;
+}
+const billboards = [];
+(function makeAds() {
+  const AHEAD = 10 * DT, SIZE = 0.5 * DT;
+  ADS.forEach((ad,i)=>{
+    const side = i%2===0 ? -1 : 1;
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: bannerTexture(ad), transparent:true, depthWrite:false }));
+    sp.position.set(side*rand(0.18,0.5)*AHEAD, 200+rand(-0.15,0.2)*AHEAD, 4500-rand(0.85,1.0)*AHEAD);
+    sp.scale.set(SIZE, SIZE*0.5, 1); sp.userData.url = ad.url;
+    billboards.push(sp); scene.add(sp);
+  });
+})();
+
+// ---------- 별(게시글) 빌드 ----------
+let stars = null, POSTS = [];
+function buildUniverse(posts) {
+  POSTS = posts;
+  const N = posts.length;
+  const positions = new Float32Array(N*3), colors = new Float32Array(N*3), sizes = new Float32Array(N), bright = new Float32Array(N);
+  posts.forEach((d,i)=>{
+    positions[i*3]=d.pos[0]; positions[i*3+1]=d.pos[1]; positions[i*3+2]=d.pos[2];
+    colors[i*3]=d.color[0]; colors[i*3+1]=d.color[1]; colors[i*3+2]=d.color[2];
+    sizes[i] = 16 + Math.sqrt(d.comments) * 4.5 + (d.supernova ? 130 : 0); // 댓글수 → 크기
+    bright[i] = 0.6 + Math.min(2.6, d.points / 450) + (d.supernova ? 2.4 : 0); // 추천수 → 밝기
+  });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions,3));
+  geo.setAttribute("aColor", new THREE.BufferAttribute(colors,3));
+  geo.setAttribute("aSize", new THREE.BufferAttribute(sizes,1));
+  geo.setAttribute("aBright", new THREE.BufferAttribute(bright,1));
+  const mat = new THREE.ShaderMaterial({
+    uniforms:{ uTex:{ value: glowTexture() } }, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
+    vertexShader:`attribute vec3 aColor; attribute float aSize; attribute float aBright;
+      varying vec3 vColor; varying float vBright;
+      void main(){ vColor=aColor; vBright=aBright;
+        vec4 mv = modelViewMatrix * vec4(position,1.0);
+        gl_PointSize = clamp(aSize*(300.0/-mv.z),1.0,400.0);
+        gl_Position = projectionMatrix * mv; }`,
+    fragmentShader:`uniform sampler2D uTex; varying vec3 vColor; varying float vBright;
+      void main(){ vec4 t=texture2D(uTex,gl_PointCoord); gl_FragColor=vec4(vColor*vBright,1.0)*t.a; }`,
+  });
+  stars = new THREE.Points(geo, mat);
+  scene.add(stars);
+
+  // 행성간 평균거리(DT)
+  const gap = avgGapDT(posts);
+  document.getElementById("gap").textContent = gap.toFixed(2) + " DT";
+}
+function avgGapDT(posts) {
+  const groups = {};
+  for (const d of posts) (groups[d.board] ||= []).push(d.pos);
+  let sum=0,cnt=0;
+  for (const k in groups){ const ps=groups[k];
+    for (let i=0;i<ps.length;i++){ let nn=Infinity;
+      for (let j=0;j<ps.length;j++) if(i!==j){ const dx=ps[i][0]-ps[j][0],dy=ps[i][1]-ps[j][1],dz=ps[i][2]-ps[j][2]; nn=Math.min(nn,dx*dx+dy*dy+dz*dz);}
+      if(isFinite(nn)){sum+=Math.sqrt(nn);cnt++;} } }
+  return cnt ? (sum/cnt)/DT : 0;
+}
+
+// ---------- 조작 ----------
+const keys={}; addEventListener("keydown",e=>keys[e.code]=true); addEventListener("keyup",e=>keys[e.code]=false);
+const startEl=document.getElementById("start"), postEl=document.getElementById("post");
+let locked=false, postOpen=false, ready=false, speed=12;
+const yaw={v:0}, pitch={v:0};
+
+startEl.addEventListener("click",()=>{ if(ready) renderer.domElement.requestPointerLock(); });
+document.addEventListener("pointerlockchange",()=>{
+  locked = document.pointerLockElement===renderer.domElement;
+  startEl.style.opacity = locked?"0":"1"; startEl.style.pointerEvents = locked?"none":"auto";
+});
+addEventListener("mousemove",e=>{ if(!locked) return;
+  yaw.v -= e.movementX*0.0011; pitch.v -= e.movementY*0.0011;
+  pitch.v = Math.max(-1.5, Math.min(1.5, pitch.v)); });
+addEventListener("wheel",e=>{ speed = Math.max(3, Math.min(140, speed - Math.sign(e.deltaY)*4)); });
+
+const raycaster=new THREE.Raycaster(); raycaster.params.Points.threshold=90;
+const centerNDC=new THREE.Vector2(0,0);
+addEventListener("mousedown",()=>{
+  if(postOpen){ closePost(); return; }
+  if(!locked || !stars) return;
+  raycaster.setFromCamera(centerNDC,camera);
+  const hits = raycaster.intersectObjects([stars,...billboards]).sort((a,b)=>a.distance-b.distance);
+  if(!hits.length) return;
+  const h=hits[0];
+  if(h.object===stars) openPost(POSTS[h.index]);
+  else if(h.object.userData.url) window.open(h.object.userData.url,"_blank");
+});
+addEventListener("keydown",e=>{ if(e.code==="Escape"&&postOpen) closePost(); });
+
+function openPost(d){
+  postOpen=true; document.exitPointerLock();
+  document.getElementById("p-tag").textContent = "Hacker News · " + d.board + (d.supernova?" · 🔥 초신성급 화제":"");
+  document.getElementById("p-title").textContent = d.title;
+  document.getElementById("p-points").textContent = d.points.toLocaleString();
+  document.getElementById("p-comments").textContent = d.comments.toLocaleString();
+  document.getElementById("p-link").href = d.url;
+  document.getElementById("p-thread").href = d.thread;
+  postEl.style.display="flex";
+}
+function closePost(){ postOpen=false; postEl.style.display="none"; renderer.domElement.requestPointerLock(); }
+
+const locEl=document.getElementById("loc");
+function updateLoc(){
+  if(!POSTS.length) return;
+  let best=null,bd=Infinity;
+  for(const d of POSTS){ const dx=d.pos[0]-camera.position.x,dy=d.pos[1]-camera.position.y,dz=d.pos[2]-camera.position.z; const v=dx*dx+dy*dy+dz*dz; if(v<bd){bd=v;best=d;} }
+  locEl.textContent = (best && Math.sqrt(bd)<1500) ? ("Hacker News — "+best.board) : "성간 공간";
+}
+
+// ---------- 렌더 루프 ----------
+const fwd=new THREE.Vector3(), right=new THREE.Vector3(), up=new THREE.Vector3(0,1,0);
+let frame=0;
+function animate(){
+  requestAnimationFrame(animate);
+  camera.quaternion.setFromEuler(new THREE.Euler(pitch.v,yaw.v,0,"YXZ"));
+  if(locked && !postOpen){
+    camera.getWorldDirection(fwd); right.crossVectors(fwd,up).normalize();
+    if(keys["KeyW"]) camera.position.addScaledVector(fwd,speed);
+    if(keys["KeyS"]) camera.position.addScaledVector(fwd,-speed);
+    if(keys["KeyA"]) camera.position.addScaledVector(right,-speed);
+    if(keys["KeyD"]) camera.position.addScaledVector(right,speed);
+    if(keys["Space"]) camera.position.y += speed;
+    if(keys["ShiftLeft"]||keys["ShiftRight"]) camera.position.y -= speed;
+  }
+  if((frame++ & 15)===0) updateLoc();
+  renderer.render(scene,camera);
+}
+animate();
+addEventListener("resize",()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
+
+// ---------- 시작 : 데이터 로드 ----------
+(async function init(){
+  const goBtn=document.getElementById("goBtn"), statusMsg=document.getElementById("statusMsg");
+  try {
+    const posts = await loadPosts();
+    buildUniverse(posts);
+    ready=true;
+    goBtn.textContent = "화면을 클릭해 우주로 진입 ▶";
+    statusMsg.textContent = window.__offline
+      ? "⚠ 실시간 연결 실패 — 오프라인 샘플로 표시 중 (인터넷 연결 후 새로고침)"
+      : `실시간 글 ${posts.length}개 로드 완료 · ${BOARDS.length}개 게시판`;
+  } catch(e){
+    goBtn.textContent = "로드 실패 — 새로고침 해주세요";
+    statusMsg.textContent = String(e);
+  }
+})();
+</script>
+</body>
+</html>

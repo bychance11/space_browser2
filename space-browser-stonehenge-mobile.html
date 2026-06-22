@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Space Browser — 스톤헨지 모드 (모바일)</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #05060f; font-family: -apple-system, "Segoe UI", "Noto Sans KR", sans-serif; color: #fff; -webkit-user-select: none; user-select: none; }
+  #c { display: block; width: 100%; height: 100%; touch-action: none; }
+
+  #year { position: fixed; left: 0; right: 0; top: 14px; z-index: 5; text-align: center; pointer-events: none; }
+  #year .y { font-size: 30px; font-weight: 700; color: #fff; text-shadow: 0 0 14px rgba(90,120,255,.6); }
+  #year .sub { font-size: 12px; color: #8b94b8; margin-top: 2px; }
+
+  #hint { position: fixed; left: 0; right: 0; bottom: 12px; z-index: 5; text-align: center; font-size: 12px; color: #8b94b8; pointer-events: none; }
+
+  /* 상승/하강 버튼 (좌하단) */
+  #move { position: fixed; left: 16px; bottom: 30px; z-index: 6; display: flex; flex-direction: column; gap: 12px; }
+  #move button { width: 64px; height: 64px; border-radius: 50%; border: 1px solid rgba(120,140,255,.45);
+    background: rgba(30,38,72,.55); color: #cdd9ff; font-size: 13px; font-weight: 600; -webkit-tap-highlight-color: transparent; }
+  #move button:active { background: rgba(70,90,170,.7); }
+  #move button .a { font-size: 22px; display: block; line-height: 1; }
+
+  #post { position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center; background: rgba(2,4,12,.72); backdrop-filter: blur(4px); }
+  #post .card { width: min(440px, 90vw); background: linear-gradient(180deg,#11142a,#0a0c1a); border: 1px solid rgba(120,140,255,.35); border-radius: 16px; padding: 22px; box-shadow: 0 0 50px rgba(80,110,255,.25); }
+  #post .tag { font-size: 12px; color: #7f8cc4; }
+  #post .yr { font-size: 26px; font-weight: 700; margin: 6px 0 4px; }
+  #post h2 { margin: 2px 0 12px; font-size: 19px; line-height: 1.4; }
+  #post .hint { font-size: 12px; color: #6f79a8; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="year"><div class="y" id="yval">–</div><div class="sub">스톤 높이 = 절대 연도 · 위로 올라갈수록 현재에 가까워집니다</div></div>
+<div id="hint">화면을 <b>드래그</b>하면 시점 회전 · 별을 <b>톡</b> 치면 사건 열기</div>
+
+<div id="move">
+  <button id="up"><span class="a">▲</span>상승</button>
+  <button id="down"><span class="a">▼</span>하강</button>
+</div>
+
+<div id="post">
+  <div class="card">
+    <div class="tag" id="p-tag">사건</div>
+    <div class="yr" id="p-yr">연도</div>
+    <h2 id="p-title">사건명</h2>
+    <div class="hint">톡 치면 닫힘</div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ============================================================
+//  스톤헨지 모드 (모바일 데모)
+//  · 중앙에 서서 3개의 거대한 스톤(서양사/동양사/제3세계사)을 본다
+//  · 스톤 높이 = 절대 연도 (세 스톤 동일 스케일 → 가로로 보면 동시대 비교)
+//  · 사건들이 별자리처럼 글로우+연결선으로 박혀 있음
+//  · 좌하단 상승/하강 버튼으로 시간(높이) 이동, 드래그로 시점 회전
+// ============================================================
+const YMIN = -2800, YMAX = 2050, STONE_H = 320, R = 16;
+
+const STONES = [
+  { name: "서양사", ang: 0, color: 0x5b9dff, events: [
+    { y: -776, t: "고대 올림픽 시작" }, { y: -509, t: "로마 공화정 수립" }, { y: -432, t: "파르테논 신전 완공" },
+    { y: -323, t: "알렉산드로스 대왕 사망" }, { y: -44, t: "카이사르 암살" }, { y: 476, t: "서로마 제국 멸망" },
+    { y: 800, t: "카롤루스 대제 대관" }, { y: 1095, t: "십자군 전쟁 시작" }, { y: 1453, t: "비잔티움 제국 멸망" },
+    { y: 1492, t: "콜럼버스 신대륙 도달" }, { y: 1517, t: "종교 개혁" }, { y: 1789, t: "프랑스 혁명" },
+    { y: 1869, t: "산업혁명 절정" }, { y: 1914, t: "제1차 세계대전" }, { y: 1945, t: "제2차 세계대전 종전" },
+    { y: 1969, t: "달 착륙" }, { y: 1991, t: "월드와이드웹 공개" },
+  ]},
+  { name: "동양사", ang: 2 * Math.PI / 3, color: 0xff6b6b, events: [
+    { y: -1600, t: "상나라 성립" }, { y: -551, t: "공자 탄생" }, { y: -221, t: "진시황 중국 통일" },
+    { y: -202, t: "한나라 건국" }, { y: 105, t: "채륜 제지술 개량" }, { y: 618, t: "당나라 건국" },
+    { y: 960, t: "송나라 건국" }, { y: 1206, t: "칭기즈칸 몽골 제국" }, { y: 1392, t: "조선 건국" },
+    { y: 1405, t: "정화의 항해" }, { y: 1592, t: "임진왜란" }, { y: 1644, t: "청나라 입관" },
+    { y: 1868, t: "메이지 유신" }, { y: 1911, t: "신해혁명" }, { y: 1949, t: "중화인민공화국 수립" },
+    { y: 1988, t: "서울 올림픽" },
+  ]},
+  { name: "제3세계사", ang: 4 * Math.PI / 3, color: 0x5ce6a0, events: [
+    { y: -2560, t: "기자 대피라미드" }, { y: -1300, t: "올메카 문명" }, { y: -150, t: "테오티우아칸 번영" },
+    { y: 250, t: "마야 고전기 시작" }, { y: 1200, t: "잉카 제국 태동" }, { y: 1324, t: "만사 무사의 메카 순례" },
+    { y: 1325, t: "아즈텍 테노치티틀란 건설" }, { y: 1450, t: "그레이트 짐바브웨" }, { y: 1521, t: "아즈텍 멸망" },
+    { y: 1533, t: "잉카 멸망" }, { y: 1804, t: "아이티 독립" }, { y: 1947, t: "인도 독립" },
+    { y: 1957, t: "가나 독립" }, { y: 1960, t: "아프리카의 해" }, { y: 1994, t: "남아공 아파르트헤이트 종식" },
+  ]},
+];
+
+const yearToH = y => (y - YMIN) / (YMAX - YMIN) * STONE_H;
+const fmtYear = y => y < 0 ? `기원전 ${-y}년` : `${y}년`;
+
+// ---------- Three.js ----------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05060f);
+scene.fog = new THREE.FogExp2(0x05060f, 0.0016);
+const camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.1, 3000);
+let camY = yearToH(-300);
+camera.position.set(0, camY, 0);
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("c"), antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+
+scene.add(new THREE.AmbientLight(0x8493c0, 1.0));
+const dir = new THREE.DirectionalLight(0xcdd9ff, 0.6); dir.position.set(1, 2, 1); scene.add(dir);
+
+// 배경 별
+(function stars() {
+  const N = 1500, p = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    const r = 600 + Math.random() * 800, t = Math.random() * 6.28, ph = Math.acos(Math.random() * 2 - 1);
+    p[i*3] = r*Math.sin(ph)*Math.cos(t); p[i*3+1] = r*Math.cos(ph) + STONE_H/2; p[i*3+2] = r*Math.sin(ph)*Math.sin(t);
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(p, 3));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0x8896c4, size: 1.6 })));
+})();
+
+// 바닥 원반
+(function ground() {
+  const m = new THREE.Mesh(new THREE.CircleGeometry(40, 48), new THREE.MeshStandardMaterial({ color: 0x0a0d18, roughness: 1 }));
+  m.rotation.x = -Math.PI / 2; m.position.y = 0; scene.add(m);
+})();
+
+function glowTexture() {
+  const s = 64, cv = document.createElement("canvas"); cv.width = cv.height = s;
+  const x = cv.getContext("2d"); const g = x.createRadialGradient(s/2,s/2,0,s/2,s/2,s/2);
+  g.addColorStop(0,"rgba(255,255,255,1)"); g.addColorStop(0.3,"rgba(255,255,255,0.8)");
+  g.addColorStop(0.6,"rgba(180,200,255,0.25)"); g.addColorStop(1,"rgba(0,0,0,0)");
+  x.fillStyle = g; x.fillRect(0,0,s,s); const t = new THREE.Texture(cv); t.needsUpdate = true; return t;
+}
+const GLOW = glowTexture();
+
+function makeLabel(text, hex) {
+  const font = 26, pad = 8, c = document.createElement("canvas"), x = c.getContext("2d");
+  x.font = `${font}px -apple-system,'Noto Sans KR',sans-serif`;
+  c.width = Math.ceil(x.measureText(text).width) + pad * 2; c.height = font + pad * 2;
+  x.font = `${font}px -apple-system,'Noto Sans KR',sans-serif`;
+  x.fillStyle = "#" + hex.toString(16).padStart(6, "0"); x.textBaseline = "middle";
+  x.shadowColor = "rgba(0,0,0,.9)"; x.shadowBlur = 4; x.fillText(text, pad, c.height / 2);
+  const t = new THREE.CanvasTexture(c);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, depthWrite: false, depthTest: false, opacity: 0.85 }));
+  sp.scale.set(c.width / c.height * 3.2, 3.2, 1);
+  return sp;
+}
+
+// ---------- 스톤 + 사건 별 배치 ----------
+const eventSprites = [];
+STONES.forEach(stone => {
+  const cx = Math.cos(stone.ang), cz = Math.sin(stone.ang);
+  // 스톤 본체
+  const slab = new THREE.Mesh(
+    new THREE.BoxGeometry(8, STONE_H, 2.6),
+    new THREE.MeshStandardMaterial({ color: 0x33363f, roughness: 0.96, emissive: 0x070910 })
+  );
+  slab.position.set(cx * (R + 1.3), STONE_H / 2, cz * (R + 1.3));
+  slab.lookAt(0, STONE_H / 2, 0);
+  scene.add(slab);
+
+  // 스톤 이름 (상단)
+  const nameLabel = makeLabel(stone.name, stone.color);
+  nameLabel.scale.multiplyScalar(2.2);
+  nameLabel.position.set(cx * R, STONE_H + 10, cz * R);
+  scene.add(nameLabel);
+
+  // 좌표 프레임
+  const inDir = new THREE.Vector3(-cx, 0, -cz);               // 중심 방향
+  const tangent = new THREE.Vector3(-cz, 0, cx);              // 폭 방향
+  const sorted = [...stone.events].sort((a, b) => a.y - b.y);
+  const positions = [];
+
+  sorted.forEach((ev, i) => {
+    const wOff = Math.sin(i * 1.7) * 2.6 + (Math.random() - 0.5) * 0.6;   // 별자리처럼 좌우로 흔들리게
+    const depth = (Math.random() - 0.5) * 1.2;
+    const pos = new THREE.Vector3(cx * (R - 1.2), yearToH(ev.y), cz * (R - 1.2));
+    pos.addScaledVector(tangent, wOff); pos.addScaledVector(inDir, depth);
+    positions.push(pos.clone());
+
+    const star = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW, color: stone.color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+    const size = 2.6 + Math.random() * 1.8;
+    star.scale.set(size, size, 1); star.position.copy(pos);
+    star.userData = { year: ev.y, title: ev.t, domain: stone.name };
+    scene.add(star); eventSprites.push(star);
+
+    const lbl = makeLabel(`${fmtYear(ev.y)} · ${ev.t}`, 0xdfe6ff);
+    lbl.position.copy(pos).add(new THREE.Vector3(0, size * 0.9 + 1.6, 0));
+    scene.add(lbl);
+  });
+
+  // 별자리 연결선
+  const geo = new THREE.BufferGeometry().setFromPoints(positions);
+  scene.add(new THREE.Line(geo, new THREE.LineBasicMaterial({ color: stone.color, transparent: true, opacity: 0.28 })));
+});
+
+// ---------- 시점(드래그) + 이동(버튼) ----------
+let yaw = -Math.PI / 2, pitch = 0.32;   // 초기: 서양사 스톤을 바라봄
+function applyCam() { camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, "YXZ")); }
+applyCam();
+
+let dragging = false, lastX = 0, lastY = 0, downX = 0, downY = 0, downT = 0, moved = false;
+const dom = renderer.domElement;
+function onDown(x, y) { dragging = true; lastX = downX = x; lastY = downY = y; downT = performance.now(); moved = false; }
+function onMove(x, y) {
+  if (!dragging) return;
+  yaw -= (x - lastX) * 0.005; pitch -= (y - lastY) * 0.005;
+  pitch = Math.max(-1.4, Math.min(1.4, pitch));
+  lastX = x; lastY = y; if (Math.abs(x - downX) + Math.abs(y - downY) > 8) moved = true;
+  applyCam();
+}
+function onUp(x, y) {
+  dragging = false;
+  if (!moved && performance.now() - downT < 300) pick(x, y);
+}
+dom.addEventListener("mousedown", e => onDown(e.clientX, e.clientY));
+addEventListener("mousemove", e => onMove(e.clientX, e.clientY));
+addEventListener("mouseup", e => onUp(e.clientX, e.clientY));
+dom.addEventListener("touchstart", e => { const t = e.touches[0]; onDown(t.clientX, t.clientY); }, { passive: true });
+dom.addEventListener("touchmove", e => { const t = e.touches[0]; onMove(t.clientX, t.clientY); e.preventDefault(); }, { passive: false });
+dom.addEventListener("touchend", e => { const t = e.changedTouches[0]; onUp(t.clientX, t.clientY); }, { passive: true });
+
+// 상승/하강 버튼 (누르고 있는 동안 이동)
+let moveDir = 0;
+function hold(el, dir) {
+  const on = e => { moveDir = dir; e.preventDefault(); };
+  const off = () => { moveDir = 0; };
+  el.addEventListener("mousedown", on); el.addEventListener("touchstart", on, { passive: false });
+  addEventListener("mouseup", off); el.addEventListener("touchend", off); el.addEventListener("touchcancel", off);
+}
+hold(document.getElementById("up"), 1);
+hold(document.getElementById("down"), -1);
+
+// ---------- 탭 → 사건 열기 ----------
+const raycaster = new THREE.Raycaster();
+const postEl = document.getElementById("post");
+function pick(sx, sy) {
+  const ndc = new THREE.Vector2((sx / innerWidth) * 2 - 1, -(sy / innerHeight) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  raycaster.params.Sprite = { threshold: 0 };
+  const hits = raycaster.intersectObjects(eventSprites);
+  if (hits.length) {
+    const d = hits[0].object.userData;
+    document.getElementById("p-tag").textContent = d.domain;
+    document.getElementById("p-yr").textContent = fmtYear(d.year);
+    document.getElementById("p-title").textContent = d.title;
+    postEl.style.display = "flex";
+  }
+}
+postEl.addEventListener("click", () => postEl.style.display = "none");
+
+// ---------- 루프 ----------
+const yval = document.getElementById("yval");
+let lastNow = performance.now();
+function loop(now) {
+  const dt = Math.min(0.05, (now - lastNow) / 1000); lastNow = now;
+  if (moveDir) {
+    camY = Math.max(4, Math.min(STONE_H - 4, camY + moveDir * 70 * dt));
+    camera.position.y = camY;
+  }
+  const year = Math.round(YMIN + (camY / STONE_H) * (YMAX - YMIN));
+  yval.textContent = fmtYear(year);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+addEventListener("resize", () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+</script>
+</body>
+</html>

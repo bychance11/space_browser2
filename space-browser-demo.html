@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Space Browser — 데모</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: -apple-system, "Segoe UI", "Noto Sans KR", sans-serif; color: #fff; }
+  #c { display: block; width: 100%; height: 100%; }
+
+  /* 조준점 */
+  #crosshair {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 22px; height: 22px; pointer-events: none; z-index: 5; opacity: .85;
+  }
+  #crosshair::before, #crosshair::after {
+    content: ""; position: absolute; background: rgba(255,255,255,.9);
+  }
+  #crosshair::before { left: 50%; top: 0; width: 1px; height: 100%; transform: translateX(-50%); }
+  #crosshair::after  { top: 50%; left: 0; height: 1px; width: 100%; transform: translateY(-50%); }
+
+  /* 시작 안내 */
+  #start {
+    position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    background: radial-gradient(circle at 50% 40%, rgba(20,24,60,.85), rgba(0,0,0,.95));
+    cursor: pointer; transition: opacity .4s;
+  }
+  #start h1 { font-size: 30px; margin: 0 0 6px; letter-spacing: 1px; }
+  #start p  { margin: 4px 0; color: #b9c2e0; font-size: 15px; line-height: 1.7; }
+  #start .keys { margin-top: 18px; font-size: 13px; color: #8b94b8; }
+  #start .go { margin-top: 26px; padding: 12px 28px; border: 1px solid #5a6cff;
+    border-radius: 999px; color: #cdd5ff; font-size: 15px; background: rgba(90,108,255,.12); }
+
+  /* HUD */
+  #hud {
+    position: fixed; left: 16px; bottom: 14px; z-index: 5; font-size: 12.5px;
+    color: #93b4ff; pointer-events: none; line-height: 1.6; text-shadow: 0 0 6px rgba(0,0,0,.8);
+  }
+  #hud b { color: #fff; font-weight: 600; }
+
+  /* 게시글 패널 */
+  #post {
+    position: fixed; inset: 0; z-index: 30; display: none;
+    align-items: center; justify-content: center;
+    background: rgba(2,4,12,.72); backdrop-filter: blur(4px);
+  }
+  #post .card {
+    width: min(560px, 88vw); background: linear-gradient(180deg, #11142a, #0a0c1a);
+    border: 1px solid rgba(120,140,255,.35); border-radius: 16px; padding: 26px 28px;
+    box-shadow: 0 0 60px rgba(80,110,255,.25);
+  }
+  #post .tag { font-size: 12px; color: #7f8cc4; letter-spacing: .5px; }
+  #post h2 { margin: 8px 0 14px; font-size: 22px; line-height: 1.35; }
+  #post .stats { display: flex; gap: 22px; margin: 6px 0 18px; }
+  #post .stats div { font-size: 13px; color: #aeb6da; }
+  #post .stats b { display: block; font-size: 22px; color: #fff; margin-top: 2px; }
+  #post .body { font-size: 14.5px; color: #c8cee8; line-height: 1.8; }
+  #post .hint { margin-top: 20px; font-size: 12.5px; color: #6f79a8; }
+  #post .hint kbd { background: #1c2142; border: 1px solid #39406e; border-radius: 5px;
+    padding: 1px 7px; color: #cdd5ff; font-size: 12px; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="crosshair"></div>
+
+<div id="hud">
+  <div>현재 위치: <b id="loc">우주 공간</b></div>
+  <div>거리 단위: <b>1 DT</b> = 1초 직진 거리 · 행성간 평균: <b id="gap">– DT</b></div>
+  <div>WASD 이동 · 마우스 시점 · <b>Space/Shift</b> 상하 · <b>휠</b> 속도조절 · <b>클릭</b> 별/광고 · <b>ESC</b> 복귀</div>
+</div>
+
+<div id="start">
+  <h1>🌌 Space Browser</h1>
+  <p>게시글을 우주의 별로 바꾼 브라우저 데모</p>
+  <p style="color:#7f8cc4;font-size:13px">조회수 = 별의 크기 · 추천수 = 별의 밝기 · 게시판 = 태양계 · 사이트 = 은하</p>
+  <div class="keys">WASD 이동 &nbsp;|&nbsp; 마우스 시점 &nbsp;|&nbsp; 화면 중앙 조준 후 클릭 &nbsp;|&nbsp; ESC 복귀</div>
+  <div class="go">화면을 클릭해 우주로 진입 ▶</div>
+</div>
+
+<div id="post">
+  <div class="card">
+    <div class="tag" id="p-tag">SITE · BOARD</div>
+    <h2 id="p-title">제목</h2>
+    <div class="stats">
+      <div>조회수<b id="p-views">0</b></div>
+      <div>추천수<b id="p-likes">0</b></div>
+    </div>
+    <div class="body" id="p-body"></div>
+    <div class="hint"><kbd>ESC</kbd> 또는 클릭하여 우주로 돌아가기</div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ============================================================
+//  Space Browser — 단일 파일 데모
+//  실제 서비스에서는 아래 makeData()가 크롤링한 DB를 읽어옵니다.
+//  지금은 가짜 데이터로 구조를 보여줍니다.
+// ============================================================
+
+// ---------- 1) 가짜 데이터 + 은하 배치 알고리즘 ----------
+const SITES = [
+  { name: "오로라 커뮤니티", color: [0.55, 0.75, 1.0], boards: ["자유게시판", "유머", "정보공유", "질문답변"] },
+  { name: "노바 포럼",      color: [1.0, 0.7, 0.5],  boards: ["뉴스", "토론", "리뷰"] },
+  { name: "에테르넷",        color: [0.7, 1.0, 0.75], boards: ["개발", "디자인", "취업", "잡담", "공지"] },
+  { name: "별빛 라운지",     color: [1.0, 0.6, 0.9],  boards: ["연애", "음악", "여행"] },
+];
+
+const TITLES = [
+  "오늘 있었던 황당한 일 공유합니다", "이거 진짜 꿀팁인데 아무도 모름", "다들 이 문제 어떻게 해결하세요?",
+  "방금 본 건데 충격적이네요", "10년차가 알려주는 핵심 정리", "이 영화 보신 분 계신가요",
+  "초보자를 위한 완벽 가이드", "회사 그만두고 느낀 점", "이번 업데이트 어떻게 생각하세요",
+  "드디어 성공했습니다 후기", "이거 사기 아닌가요?", "주말에 가볼만한 곳 추천", "논란의 그 사건 정리해봤습니다",
+];
+
+function rand(a, b) { return a + Math.random() * (b - a); }
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+// 은하(사이트)들을 서로 멀리 떨어뜨려 배치 — 최소 거리 보장
+function placeGalaxies(n) {
+  const centers = [], MIN = 5000, R = 9000;
+  let guard = 0;
+  while (centers.length < n && guard++ < 5000) {
+    const p = [rand(-R, R), rand(-R * 0.4, R * 0.4), rand(-R, R)];
+    if (centers.every(c => Math.hypot(c[0]-p[0], c[1]-p[1], c[2]-p[2]) > MIN)) centers.push(p);
+  }
+  return centers;
+}
+
+// 게시판(태양계)들을 은하 중심 주변 군집으로 배치
+function placeBoards(center, n) {
+  return Array.from({ length: n }, () => [
+    center[0] + rand(-1300, 1300),
+    center[1] + rand(-500, 500),
+    center[2] + rand(-1300, 1300),
+  ]);
+}
+
+// 게시글(별)을 게시판 중심 주위 나선팔 모양으로 흩뿌림 — 인기글일수록 중심에 가깝게
+function placePost(boardCenter, popularity) {
+  const arm = rand(0, Math.PI * 2);
+  const dist = (1 - popularity) * rand(120, 700) + 60;     // 인기 높을수록 중심 근처
+  const ang = arm + dist * 0.012;                          // 나선
+  return [
+    boardCenter[0] + Math.cos(ang) * dist + rand(-40, 40),
+    boardCenter[1] + rand(-90, 90),
+    boardCenter[2] + Math.sin(ang) * dist + rand(-40, 40),
+  ];
+}
+
+function makeData() {
+  const posts = [];
+  const galaxyCenters = placeGalaxies(SITES.length);
+  SITES.forEach((site, si) => {
+    const boardCenters = placeBoards(galaxyCenters[si], site.boards.length);
+    site.boards.forEach((board, bi) => {
+      const count = Math.floor(rand(18, 46));
+      for (let i = 0; i < count; i++) {
+        // 조회수: 대부분 평범, 가끔 대박. 초신성급은 아주 드물게.
+        let views = Math.floor(Math.pow(rand(0, 1), 2.2) * 80000) + 200;
+        const supernova = Math.random() < 0.02;
+        if (supernova) views = Math.floor(rand(300000, 900000));
+        const likes = Math.floor(views * rand(0.01, 0.12)) + Math.floor(rand(0, 50));
+        const popularity = Math.min(1, views / 120000);
+        posts.push({
+          site: site.name, board, color: site.color, supernova,
+          title: pick(TITLES), views, likes,
+          pos: placePost(boardCenters[bi], popularity),
+        });
+      }
+    });
+  });
+  return posts;
+}
+
+const POSTS = makeData();
+
+// ---------- 거리 단위 DT ----------
+// 1 DT = 사용자가 1초 직진할 때 이동하는 거리 (기본 속도 12 units/frame × 60fps)
+const DT = 12 * 60;  // = 720 월드 단위
+
+// 게시판(태양계) 내 행성간 평균 거리 계산 (최근접 이웃 평균)
+function avgPlanetGapDT() {
+  const groups = {};
+  for (const d of POSTS) (groups[d.site + "|" + d.board] ||= []).push(d.pos);
+  let sum = 0, cnt = 0;
+  for (const k in groups) {
+    const ps = groups[k];
+    for (let i = 0; i < ps.length; i++) {
+      let nn = Infinity;
+      for (let j = 0; j < ps.length; j++) if (i !== j) {
+        const dx = ps[i][0]-ps[j][0], dy = ps[i][1]-ps[j][1], dz = ps[i][2]-ps[j][2];
+        nn = Math.min(nn, dx*dx+dy*dy+dz*dz);
+      }
+      if (isFinite(nn)) { sum += Math.sqrt(nn); cnt++; }
+    }
+  }
+  return (sum / cnt) / DT;
+}
+const PLANET_GAP_DT = avgPlanetGapDT();
+document.getElementById("gap").textContent = PLANET_GAP_DT.toFixed(2) + " DT";
+
+// ---------- 2) Three.js 우주 렌더링 ----------
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x05060f, 0.000035);
+
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 1, 200000);
+camera.position.set(0, 200, 4500);
+
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("c"), antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.setClearColor(0x02030a, 1);
+
+// 배경 먼 별먼지 (장식)
+(function dust() {
+  const N = 4000, p = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    const r = rand(12000, 60000), t = rand(0, Math.PI * 2), ph = Math.acos(rand(-1, 1));
+    p[i*3] = r*Math.sin(ph)*Math.cos(t); p[i*3+1] = r*Math.sin(ph)*Math.sin(t); p[i*3+2] = r*Math.cos(ph);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(p, 3));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0x556099, size: 2, sizeAttenuation: false })));
+})();
+
+// 발광 텍스처 (캔버스로 생성 — 외부 이미지 불필요)
+function glowTexture() {
+  const s = 64, cv = document.createElement("canvas"); cv.width = cv.height = s;
+  const ctx = cv.getContext("2d");
+  const g = ctx.createRadialGradient(s/2, s/2, 0, s/2, s/2, s/2);
+  g.addColorStop(0, "rgba(255,255,255,1)");
+  g.addColorStop(0.25, "rgba(255,255,255,0.85)");
+  g.addColorStop(0.55, "rgba(160,180,255,0.25)");
+  g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, s, s);
+  const t = new THREE.Texture(cv); t.needsUpdate = true; return t;
+}
+
+// 게시글 별들 — Points + 커스텀 셰이더 (크기/색/밝기 per-point)
+const N = POSTS.length;
+const positions = new Float32Array(N * 3);
+const colors = new Float32Array(N * 3);
+const sizes = new Float32Array(N);
+const bright = new Float32Array(N);
+
+POSTS.forEach((d, i) => {
+  positions[i*3] = d.pos[0]; positions[i*3+1] = d.pos[1]; positions[i*3+2] = d.pos[2];
+  colors[i*3] = d.color[0]; colors[i*3+1] = d.color[1]; colors[i*3+2] = d.color[2];
+  // 조회수 → 크기
+  sizes[i] = 18 + Math.sqrt(d.views) * 0.9 + (d.supernova ? 140 : 0);
+  // 추천수 → 밝기 (초신성은 멀리서도 보이게 강하게)
+  bright[i] = 0.6 + Math.min(2.4, d.likes / 1500) + (d.supernova ? 2.5 : 0);
+});
+
+const geo = new THREE.BufferGeometry();
+geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+geo.setAttribute("aColor", new THREE.BufferAttribute(colors, 3));
+geo.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
+geo.setAttribute("aBright", new THREE.BufferAttribute(bright, 1));
+
+const mat = new THREE.ShaderMaterial({
+  uniforms: { uTex: { value: glowTexture() } },
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  vertexShader: `
+    attribute vec3 aColor; attribute float aSize; attribute float aBright;
+    varying vec3 vColor; varying float vBright;
+    void main() {
+      vColor = aColor; vBright = aBright;
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      gl_PointSize = aSize * (300.0 / -mv.z);
+      gl_PointSize = clamp(gl_PointSize, 1.0, 400.0);
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader: `
+    uniform sampler2D uTex; varying vec3 vColor; varying float vBright;
+    void main() {
+      vec4 t = texture2D(uTex, gl_PointCoord);
+      gl_FragColor = vec4(vColor * vBright, 1.0) * t.a;
+    }`,
+});
+
+const stars = new THREE.Points(geo, mat);
+scene.add(stars);
+
+// ---------- 광고 우주쓰레기 (푯말 배너) ----------
+// 항상 사용자를 바라보는 Sprite. 리소스 거의 안 듦 (몇 개~수백 개도 무난).
+const ADS = [
+  { text: "AD · 신작 게임 출시!", sub: "지금 플레이 ▶", bg: "#2a1840", url: "https://example.com/ad1" },
+  { text: "AD · 우주 여행 특가", sub: "예약하기 ▶",   bg: "#0e2a3a", url: "https://example.com/ad2" },
+  { text: "AD · 별 분양 이벤트", sub: "자세히 ▶",     bg: "#3a200e", url: "https://example.com/ad3" },
+];
+
+function bannerTexture(ad) {
+  const w = 512, h = 256, cv = document.createElement("canvas");
+  cv.width = w; cv.height = h;
+  const ctx = cv.getContext("2d");
+  // 푯말 판
+  ctx.fillStyle = ad.bg; ctx.strokeStyle = "rgba(255,255,255,.55)"; ctx.lineWidth = 8;
+  ctx.beginPath(); ctx.roundRect(14, 14, w-28, h-28, 24); ctx.fill(); ctx.stroke();
+  // 모서리 리벳 느낌
+  ctx.fillStyle = "rgba(255,255,255,.3)";
+  [[40,40],[w-40,40],[40,h-40],[w-40,h-40]].forEach(([x,y]) => { ctx.beginPath(); ctx.arc(x,y,7,0,7); ctx.fill(); });
+  // 문구
+  ctx.textAlign = "center"; ctx.fillStyle = "#fff";
+  ctx.font = "bold 44px -apple-system, 'Noto Sans KR', sans-serif";
+  ctx.fillText(ad.text, w/2, h/2 - 6);
+  ctx.font = "26px -apple-system, 'Noto Sans KR', sans-serif";
+  ctx.fillStyle = "rgba(255,255,255,.85)";
+  ctx.fillText(ad.sub, w/2, h/2 + 46);
+  const t = new THREE.Texture(cv); t.needsUpdate = true; return t;
+}
+
+const billboards = [];
+// 시작 카메라(0,200,4500)가 -z를 바라봄. 정면 10 DT 거리, 좌우로 흩어 배치.
+const AHEAD = 10 * DT;                 // 10 DT
+const SIZE = 0.5 * DT;                 // 0.5 DT (가로). 세로는 2:1 배너라 절반.
+ADS.forEach((ad, i) => {
+  const side = i % 2 === 0 ? -1 : 1;   // 좌/우 번갈아
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: bannerTexture(ad), transparent: true, depthWrite: false,
+  }));
+  sp.position.set(
+    side * rand(0.18, 0.5) * AHEAD,            // 좌우
+    200 + rand(-0.15, 0.2) * AHEAD,            // 약간 상하
+    4500 - rand(0.85, 1.0) * AHEAD,            // 정면 약 10 DT
+  );
+  sp.scale.set(SIZE, SIZE * 0.5, 1);
+  sp.userData.url = ad.url;
+  billboards.push(sp); scene.add(sp);
+});
+
+// ---------- 3) 1인칭 조작 (포인터락 + WASD) ----------
+const keys = {};
+addEventListener("keydown", e => { keys[e.code] = true; });
+addEventListener("keyup",   e => { keys[e.code] = false; });
+
+const startEl = document.getElementById("start");
+const postEl = document.getElementById("post");
+let locked = false, postOpen = false;
+let speed = 12;
+const yaw = { v: 0 }, pitch = { v: 0 };
+
+startEl.addEventListener("click", () => renderer.domElement.requestPointerLock());
+
+document.addEventListener("pointerlockchange", () => {
+  locked = document.pointerLockElement === renderer.domElement;
+  startEl.style.opacity = locked ? "0" : "1";
+  startEl.style.pointerEvents = locked ? "none" : "auto";
+});
+
+addEventListener("mousemove", e => {
+  if (!locked) return;
+  yaw.v -= e.movementX * 0.0011;
+  pitch.v -= e.movementY * 0.0011;
+  pitch.v = Math.max(-1.5, Math.min(1.5, pitch.v));
+});
+
+addEventListener("wheel", e => {
+  speed = Math.max(3, Math.min(140, speed - Math.sign(e.deltaY) * 4));
+});
+
+// 클릭 = 조준한 별 열기 (또는 패널 닫기)
+const raycaster = new THREE.Raycaster();
+raycaster.params.Points.threshold = 90;
+const centerNDC = new THREE.Vector2(0, 0);
+
+addEventListener("mousedown", () => {
+  if (postOpen) { closePost(); return; }
+  if (!locked) return;
+  raycaster.setFromCamera(centerNDC, camera);
+  // 별 + 광고 푯말을 함께 검사, 가장 가까운 대상 선택
+  const hits = raycaster.intersectObjects([stars, ...billboards]).sort((a, b) => a.distance - b.distance);
+  if (!hits.length) return;
+  const h = hits[0];
+  if (h.object === stars) openPost(POSTS[h.index]);
+  else if (h.object.userData.url) window.open(h.object.userData.url, "_blank"); // 광고 페이지로
+});
+
+addEventListener("keydown", e => { if (e.code === "Escape" && postOpen) closePost(); });
+
+function openPost(d) {
+  postOpen = true;
+  document.exitPointerLock();
+  document.getElementById("p-tag").textContent = `${d.site} · ${d.board}` + (d.supernova ? " · 🔥 초신성급 화제" : "");
+  document.getElementById("p-title").textContent = d.title;
+  document.getElementById("p-views").textContent = d.views.toLocaleString();
+  document.getElementById("p-likes").textContent = d.likes.toLocaleString();
+  document.getElementById("p-body").textContent =
+    "여기에 실제 게시글 본문이 들어옵니다. 데모에서는 별 하나가 게시글 하나에 대응한다는 것만 보여줍니다. " +
+    "실제 서비스에서는 이 별을 클릭하면 크롤링해 둔 원문 링크로 연결하거나 본문을 불러옵니다.";
+  postEl.style.display = "flex";
+}
+function closePost() {
+  postOpen = false; postEl.style.display = "none";
+  renderer.domElement.requestPointerLock();
+}
+
+// 현재 위치(가장 가까운 게시판) HUD 표시
+const locEl = document.getElementById("loc");
+function updateLoc() {
+  let best = null, bd = Infinity;
+  for (const d of POSTS) {
+    const dx = d.pos[0]-camera.position.x, dy = d.pos[1]-camera.position.y, dz = d.pos[2]-camera.position.z;
+    const dist = dx*dx+dy*dy+dz*dz;
+    if (dist < bd) { bd = dist; best = d; }
+  }
+  locEl.textContent = (best && Math.sqrt(bd) < 1800) ? `${best.site} — ${best.board}` : "성간 공간 (galaxy 사이)";
+}
+
+// ---------- 렌더 루프 ----------
+const fwd = new THREE.Vector3(), right = new THREE.Vector3(), up = new THREE.Vector3(0,1,0);
+let frame = 0;
+function animate() {
+  requestAnimationFrame(animate);
+
+  // 시점
+  const q = new THREE.Quaternion()
+    .setFromEuler(new THREE.Euler(pitch.v, yaw.v, 0, "YXZ"));
+  camera.quaternion.copy(q);
+
+  if (locked && !postOpen) {
+    camera.getWorldDirection(fwd);
+    right.crossVectors(fwd, up).normalize();
+    const s = speed * (keys["ShiftLeft"] && keys["KeyW"] ? 1 : 1);
+    if (keys["KeyW"]) camera.position.addScaledVector(fwd, speed);
+    if (keys["KeyS"]) camera.position.addScaledVector(fwd, -speed);
+    if (keys["KeyA"]) camera.position.addScaledVector(right, -speed);
+    if (keys["KeyD"]) camera.position.addScaledVector(right, speed);
+    if (keys["Space"]) camera.position.y += speed;
+    if (keys["ShiftLeft"] || keys["ShiftRight"]) camera.position.y -= speed;
+  }
+
+  if ((frame++ & 15) === 0) updateLoc();
+  renderer.render(scene, camera);
+}
+animate();
+
+addEventListener("resize", () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

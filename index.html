@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Space Browser</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: #04050d; color: #fff; font-family: -apple-system, "Segoe UI", "Noto Sans KR", sans-serif; }
+  #bg { position: fixed; inset: 0; z-index: 0; }
+  .wrap { position: relative; z-index: 1; max-width: 920px; margin: 0 auto; padding: 56px 20px 60px; }
+  h1 { font-size: 34px; margin: 0 0 6px; letter-spacing: 1px; }
+  .sub { color: #9fb0dd; font-size: 15px; margin: 0 0 6px; }
+  .note { color: #6f79a8; font-size: 13px; margin: 0 0 34px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  a.card { display: block; text-decoration: none; color: inherit; border: 1px solid rgba(120,140,255,.28);
+    background: linear-gradient(180deg, rgba(20,26,54,.6), rgba(10,12,26,.6)); border-radius: 16px; padding: 22px;
+    transition: transform .15s, border-color .15s, box-shadow .15s; }
+  a.card:hover { transform: translateY(-3px); border-color: rgba(120,140,255,.6); box-shadow: 0 10px 40px rgba(80,110,255,.2); }
+  .card .emoji { font-size: 30px; }
+  .card h2 { font-size: 18px; margin: 10px 0 6px; }
+  .card p { font-size: 13px; color: #aeb6da; line-height: 1.6; margin: 0; }
+  .tag { display: inline-block; margin-top: 12px; font-size: 11px; color: #cdd5ff; background: rgba(90,108,255,.16);
+    border: 1px solid rgba(120,140,255,.35); border-radius: 999px; padding: 3px 10px; }
+  footer { margin-top: 40px; color: #5a637f; font-size: 12px; line-height: 1.7; }
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<div class="wrap">
+  <h1>🌌 Space Browser</h1>
+  <p class="sub">웹의 글을 우주의 별로 — 화제도에 따라 빛나고 흐르는 탐색기</p>
+  <p class="note">데이터는 열 때마다 위키백과에서 실시간으로 받아옵니다 (매일 자동 갱신).</p>
+
+  <div class="grid">
+    <a class="card" href="space-browser-nightsky.html">
+      <div class="emoji">🌌</div><h2>밤하늘 — 데스크톱</h2>
+      <p>화제 큰 글이 밝고 크게, 천천히 흐르는 별들의 강. 스페이스바를 누르면 진행.</p>
+      <span class="tag">PC · 키보드/마우스</span>
+    </a>
+    <a class="card" href="space-browser-nightsky-mobile.html">
+      <div class="emoji">📱</div><h2>밤하늘 — 모바일</h2>
+      <p>남동→북서 대각선 흐름. 누르면 진행, 핀치로 확대, 위경도 격자로 배율 표시.</p>
+      <span class="tag">모바일 · 터치</span>
+    </a>
+    <a class="card" href="space-browser-live.html">
+      <div class="emoji">🚀</div><h2>우주 유영</h2>
+      <p>1인칭으로 우주를 날아다니며 별(글)을 찾아가는 3D 탐험. WASD + 마우스.</p>
+      <span class="tag">PC · 3D</span>
+    </a>
+    <a class="card" href="space-browser-stonehenge-mobile.html">
+      <div class="emoji">🗿</div><h2>스톤헨지 — 모바일</h2>
+      <p>3개 스톤(서양·동양·제3세계사)에 별자리처럼 박힌 역사. 높이 = 절대 연도.</p>
+      <span class="tag">모바일 · 3D</span>
+    </a>
+  </div>
+
+  <footer>
+    각 모드는 독립 HTML 파일입니다. 휴대폰에서는 "모바일" 버전을, PC에서는 데스크톱/우주 버전을 추천합니다.
+  </footer>
+</div>
+
+<script>
+// 배경 별 (장식)
+const cv = document.getElementById("bg"), ctx = cv.getContext("2d");
+let stars = [];
+function resize() {
+  cv.width = innerWidth; cv.height = innerHeight;
+  stars = Array.from({ length: 160 }, () => ({ x: Math.random()*cv.width, y: Math.random()*cv.height, r: Math.random()*1.4+0.3, a: Math.random()*0.6+0.2, tw: Math.random()*6.28 }));
+}
+resize(); addEventListener("resize", resize);
+(function loop(t) {
+  ctx.fillStyle = "#04050d"; ctx.fillRect(0,0,cv.width,cv.height);
+  for (const s of stars) { ctx.globalAlpha = s.a*(0.6+0.4*Math.sin(t/600+s.tw)); ctx.fillStyle="#cdd9ff"; ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,6.28); ctx.fill(); }
+  ctx.globalAlpha = 1; requestAnimationFrame(loop);
+})(0);
+</script>
+</body>
+</html>

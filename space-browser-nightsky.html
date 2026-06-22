@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Space Browser — 밤하늘 모드 (Wikipedia)</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #02030a; font-family: -apple-system, "Segoe UI", "Noto Sans KR", sans-serif; color: #fff; }
+  #c { display: block; width: 100%; height: 100%; cursor: crosshair; }
+
+  #legend { position: fixed; left: 16px; top: 14px; z-index: 5; font-size: 12.5px; color: #9fb4e0; line-height: 1.7; text-shadow: 0 0 6px rgba(0,0,0,.9); pointer-events: none; max-width: 46vw; }
+  #legend b { color: #fff; }
+  #legend .title { font-size: 15px; color: #cdd9ff; margin-bottom: 4px; }
+
+  #ctrl { position: fixed; right: 16px; top: 14px; z-index: 6; font-size: 12.5px; color: #9fb4e0; text-align: right; }
+  #ctrl label { display: block; margin-bottom: 6px; }
+  #status { position: fixed; left: 16px; bottom: 12px; z-index: 5; font-size: 12px; color: #6f79a8; pointer-events: none; }
+
+  #post { position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center; background: rgba(2,4,12,.7); backdrop-filter: blur(4px); }
+  #post .card { width: min(560px, 88vw); background: linear-gradient(180deg,#11142a,#0a0c1a); border: 1px solid rgba(120,140,255,.35); border-radius: 16px; padding: 26px 28px; box-shadow: 0 0 60px rgba(80,110,255,.25); }
+  #post .tag { font-size: 12px; color: #7f8cc4; letter-spacing: .5px; }
+  #post h2 { margin: 8px 0 14px; font-size: 21px; line-height: 1.4; }
+  #post .stats { display: flex; gap: 22px; margin: 6px 0 14px; }
+  #post .stats div { font-size: 13px; color: #aeb6da; }
+  #post .stats b { display: block; font-size: 21px; color: #fff; margin-top: 2px; }
+  #post a { display: inline-block; margin-top: 6px; padding: 9px 16px; border-radius: 9px; text-decoration: none; font-size: 13.5px; background: rgba(90,108,255,.16); border: 1px solid rgba(120,140,255,.4); color: #cdd5ff; }
+  #post a:hover { background: rgba(90,108,255,.3); }
+  #post .hint { margin-top: 16px; font-size: 12.5px; color: #6f79a8; }
+  #post .hint kbd { background: #1c2142; border: 1px solid #39406e; border-radius: 5px; padding: 1px 7px; color: #cdd5ff; font-size: 12px; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="legend">
+  <div class="title">🌌 밤하늘 모드 <span style="color:#7f8cc4;font-size:12px">· Wikipedia 화제도</span></div>
+  <div>오른쪽(동)에서 떠올라 왼쪽(서)으로 흐르는 <b>별들의 강</b></div>
+  <div>조회수 큰 글 = <b>밝고 크고 천천히</b> 흐름 · 연관 문서를 <b>중력으로</b> 위성처럼 끌고 다님</div>
+  <div style="color:#7f8cc4">위성은 결속 약하면 먼저 이탈·소멸 · 별 클릭 → 문서 열기</div>
+</div>
+
+<div id="ctrl">
+  <label>시간 배속 <b id="spd">5×</b></label>
+  <input id="speed" type="range" min="1" max="40" value="5" />
+</div>
+<div id="status">데이터 불러오는 중…</div>
+<div id="playhint" style="position:fixed; left:0; right:0; bottom:42px; z-index:5; text-align:center; font-size:14px; color:#cdd9ff; pointer-events:none; opacity:1; transition:opacity .6s; text-shadow:0 0 8px rgba(0,0,0,.9);">⏸ <b>스페이스바를 누르고 있으면</b> 별이 진행합니다</div>
+
+<div id="post">
+  <div class="card">
+    <div class="tag" id="p-tag">문서</div>
+    <h2 id="p-title">제목</h2>
+    <div class="stats">
+      <div>조회수<b id="p-views">–</b></div>
+      <div>관계<b id="p-rel">–</b></div>
+    </div>
+    <a id="p-link" href="#" target="_blank" rel="noopener">위키백과에서 보기 ↗</a>
+    <div class="hint"><kbd>ESC</kbd> 또는 빈 하늘 클릭하여 닫기</div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+//  밤하늘 모드 v2 — Wikipedia 화제도 (별들의 강)
+//  - most-read 문서 = 강을 흐르는 별, 조회수 = 밝기/크기/느림
+//  - 무거운 별은 연관 문서를 "중력"으로 위성처럼 끌고 흐름
+//  - 결속 약한 위성은 먼저 이탈/소멸, 별은 중간에서도 사라질 수 있음
+//  - 단일 아치 → 수십 개의 보이지 않는 레인(타원형 강 흐름)
+//  데이터: ko.wikipedia REST API (브라우저 CORS 허용). 실패 시 폴백.
+// ============================================================
+const LANG = "ko";
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+let W, H, horizonY, arcAmp, laneH, skylineH, skyline = [];
+function buildSkyline() {
+  skyline = []; let x = 0;
+  while (x < W) {
+    const w = rand(26, 88), h = skylineH + rand(0, skylineH * 0.95);
+    const win = Array.from({ length: Math.floor(rand(2, 9)) }, () => ({ wx: rand(0.12, 0.85), wy: rand(0.1, 0.92), on: Math.random() < 0.45 }));
+    skyline.push({ x, w, h, win }); x += w + rand(0, 5);
+  }
+}
+function resize() {
+  W = cv.width = innerWidth; H = cv.height = innerHeight;
+  skylineH = H * 0.1;                 // 도시 지평선 높이 ≈ 세로 1/10
+  horizonY = H - skylineH - H * 0.05; // 별이 뜨고 지는 지평선 라인
+  arcAmp = H * 0.5;                   // 천정까지 들어올리는 곡률(자전축 효과)
+  laneH = H * 0.15;                   // 레인 세로 폭
+  buildSkyline();
+}
+resize(); addEventListener("resize", resize);
+const PALETTE = ["#ff6b6b","#5b9dff","#5ce6a0","#ff79c6","#ffb454","#4fd6e0","#c9a0ff","#ffd24f"];
+
+// ---------- 폴백(오프라인) 데이터 ----------
+const FALLBACK = [
+  { title:"2026년 월드컵", views:182000, related:["축구","FIFA","대한민국 축구 국가대표팀","월드컵 결승전","손흥민"] },
+  { title:"인공지능", views:151000, related:["기계 학습","딥러닝","생성형 인공지능","신경망","튜링 테스트"] },
+  { title:"블랙홀", views:96000, related:["사건의 지평선","일반 상대성이론","중성자별","은하","빅뱅"] },
+  { title:"대한민국", views:88000, related:["서울특별시","한국어","대한민국의 역사","K-pop"] },
+  { title:"기후 변화", views:74000, related:["온실가스","지구 온난화","탄소중립","재생에너지"] },
+  { title:"제임스 웹 우주 망원경", views:61000, related:["허블 우주 망원경","외계 행성","적외선","NASA"] },
+  { title:"양자 컴퓨터", views:43000, related:["큐비트","양자 얽힘","양자역학"] },
+  { title:"고양이", views:39000, related:["반려동물","포유류","호랑이"] },
+  { title:"비트코인", views:35000, related:["블록체인","암호화폐","이더리움"] },
+  { title:"광합성", views:21000, related:["엽록체","식물","산소"] },
+  { title:"피보나치 수", views:12000, related:["황금비","수열"] },
+  { title:"에베레스트산", views:9000, related:["히말라야산맥","등산"] },
+  { title:"커피", views:7600, related:["카페인","에스프레소"] },
+  { title:"종이접기", views:3100, related:["오리가미"] },
+  { title:"클립", views:1500, related:[] },
+  { title:"압정", views:900, related:[] },
+];
+
+// ---------- 데이터 로딩 ----------
+function ymd(date) { return [date.getUTCFullYear(), String(date.getUTCMonth()+1).padStart(2,"0"), String(date.getUTCDate()).padStart(2,"0")]; }
+async function fetchTop() {
+  // 어제 → 그제 순으로 시도 (당일 집계는 아직 없음)
+  for (let back = 1; back <= 2; back++) {
+    const d = new Date(); d.setUTCDate(d.getUTCDate() - back);
+    const [y, m, dd] = ymd(d);
+    const url = `https://wikimedia.org/api/rest_v1/metrics/pageviews/top/${LANG}.wikipedia/all-access/${y}/${m}/${dd}`;
+    try {
+      const r = await fetch(url);
+      if (!r.ok) continue;
+      const j = await r.json();
+      const arts = (j.items?.[0]?.articles || [])
+        .filter(a => !/[:_]특수|^특수:|^위키백과:|^파일:|^분류:|^틀:|^도움말:|^Special:|^대문$|^Wikipedia:/.test(a.article) && a.article !== "주요_문서")
+        .filter(a => !a.article.includes(":"))
+        .slice(0, 200);
+      if (arts.length) return { arts, date: `${y}-${m}-${dd}` };
+    } catch (e) { /* 다음 날짜 시도 */ }
+  }
+  throw new Error("top 조회 실패");
+}
+async function fetchRelated(article) {
+  // page/related 엔드포인트는 폐기됨 → Action API morelike(유사 문서) 사용, 비면 links로 폴백
+  const base = `https://${LANG}.wikipedia.org/w/api.php?format=json&origin=*&action=query`;
+  const self = article.replace(/_/g, " ");
+  try {
+    let r = await fetch(`${base}&list=search&srnamespace=0&srlimit=6&srsearch=${encodeURIComponent("morelike:" + article)}`);
+    let j = await r.json();
+    let arr = (j.query?.search || []).map(s => s.title);
+    if (!arr.length) {
+      r = await fetch(`${base}&prop=links&plnamespace=0&pllimit=8&titles=${encodeURIComponent(article)}`);
+      j = await r.json();
+      const first = Object.values(j.query?.pages || {})[0] || {};
+      arr = (first.links || []).map(l => l.title);
+    }
+    return arr.filter(t => t && t !== self && !t.includes(":")).slice(0, 5);
+  } catch (e) { return []; }
+}
+async function loadData() {
+  try {
+    const { arts, date } = await fetchTop();
+    const maxV = arts[0].views;
+    // 상위 24개는 연관 문서까지 가져오기 (위성)
+    const top = arts.slice(0, 24);
+    const related = await Promise.all(top.map(a => fetchRelated(a.article)));
+    const list = arts.map((a, i) => ({
+      title: a.article.replace(/_/g, " "),
+      views: a.views,
+      weight: clamp(Math.sqrt(a.views / maxV), 0.12, 1),
+      related: i < 24 ? related[i] : [],
+    }));
+    return { list, source: `Wikipedia(${LANG}) 실시간 · ${date} 조회수 상위` };
+  } catch (e) {
+    console.warn("위키 로딩 실패 → 폴백:", e);
+    const maxV = FALLBACK[0].views;
+    return {
+      list: FALLBACK.map(a => ({ ...a, weight: clamp(Math.sqrt(a.views / maxV), 0.12, 1) })),
+      source: "⚠ 실시간 연결 실패 — 오프라인 샘플 (인터넷 연결 후 새로고침)",
+    };
+  }
+}
+
+// ---------- 별/위성 생성 ----------
+let DATA = [], dataIdx = 0, mains = [];
+function makeMain(d) {
+  const maxU = 1.0;                              // 모두 서쪽 끝까지 흐른다 (중간 소멸 없음)
+  const life = 10 + Math.pow(d.weight, 2.5) * 220; // 핫할수록 수명 급격히↑ (가장 핫=수분, 시덥잖음=수초)
+  const color = PALETTE[Math.floor(rand(0, PALETTE.length))];
+  const sats = (d.related || []).slice(0, 5).map((title, i) => ({
+    title, bind: clamp(1 - i * 0.19, 0.1, 1),
+    ang: rand(0, 6.28), orbitR: 24 + i * 16, orbitSpeed: rand(0.4, 1.1) * (i % 2 ? 1 : -1),
+    life: 1, lifeDecay: 0.012 + i * 0.02,        // 결속 약할수록(뒤 순위) 빨리 소멸
+    sx: 0, sy: 0, alpha: 0, rank: i + 1,
+  }));
+  return {
+    title: d.title, views: d.views, weight: d.weight, color,
+    u: 0, maxU, speed: maxU / life, ly: rand(-1, 1),
+    bob: rand(0, 6.28), bobAmp: rand(6, 22), alpha: 0, sats, sx: 0, sy: 0,
+  };
+}
+function spawnNext() {
+  if (!DATA.length) return;
+  mains.push(makeMain(DATA[dataIdx % DATA.length]));
+  dataIdx++;
+}
+
+// 좌표: u(0=동/오른쪽 → 1=서/왼쪽). 동쪽 지평선에서 떠 천정을 지나 서쪽으로 진다(완만한 곡률).
+function flowXY(u, ly, bobPhase, bobAmp, t) {
+  const u01 = clamp(u, 0, 1);
+  const arc = Math.sin(Math.PI * u01);               // 0(지평선)→1(천정)→0(지평선)
+  const env = Math.pow(arc, 0.55);                   // 지평선 근처일수록 레인이 좁아짐(수렴)
+  const x = W * 1.08 - u * (W * 1.22);
+  const centerY = horizonY - arcAmp * arc;           // 곡률(자전축 효과)
+  const y = centerY + ly * laneH * env + Math.sin(t * 0.5 + bobPhase) * bobAmp * 0.5;
+  return { x, y };
+}
+
+// ---------- 배경 별 ----------
+const bg = Array.from({ length: 240 }, () => ({ x: rand(0,1), y: rand(0,1), r: rand(0.4,1.3), a: rand(0.15,0.7), tw: rand(0,6.28) }));
+
+// ---------- 마우스 ----------
+let mx = -1, my = -1;
+cv.addEventListener("mousemove", e => { mx = e.clientX; my = e.clientY; });
+
+// ---------- 업데이트 ----------
+let timeScale = 5, spawnTimer = 0, nextSpawnIn = 0.6;
+const SLOW = 5;   // 전체 속도를 5배 더 느리게 (1배속이 예전보다 5배 느림)
+const speedEl = document.getElementById("speed"), spdLabel = document.getElementById("spd");
+speedEl.addEventListener("input", () => { timeScale = +speedEl.value; spdLabel.textContent = timeScale + "×"; });
+
+function update(dt, t) {
+  for (const m of mains) {
+    m.u += m.speed * dt;
+    const fin = clamp(m.u / 0.05, 0, 1), fout = clamp((m.maxU - m.u) / 0.1, 0, 1);
+    m.alpha = Math.min(fin, fout);
+    const p = flowXY(m.u, m.ly, m.bob, m.bobAmp, t); m.sx = p.x; m.sy = p.y;
+    for (const s of m.sats) {
+      s.ang += s.orbitSpeed * dt;
+      s.life -= s.lifeDecay * dt;                 // 약한 결속 = 빨리 소멸
+      s.orbitR += (1 - s.bind) * 6 * dt;          // 약하면 점점 멀어짐(이탈)
+      s.alpha = clamp(s.life, 0, 1) * m.alpha;
+      s.sx = p.x + Math.cos(s.ang) * s.orbitR;
+      s.sy = p.y + Math.sin(s.ang) * s.orbitR * 0.62;
+    }
+    m.sats = m.sats.filter(s => s.life > 0);
+  }
+  mains = mains.filter(m => m.u < m.maxU);
+
+  // 등장은 한 프레임에 최대 1개 + 간격을 무작위로 → 뭉쳐서 나오지 않음
+  spawnTimer += dt;
+  if (spawnTimer >= nextSpawnIn) {
+    spawnTimer = 0; nextSpawnIn = rand(0.2, 0.9);
+    if (mains.length < 70) spawnNext();
+  }
+}
+
+// ---------- 렌더 ----------
+function mainRadius(m) { return 5 + m.weight * 22; }                       // 클릭/배치 기준 반경
+function mainGlowR(m) { return 30 + Math.pow(m.weight, 2.3) * H * 1.25; }  // 무거울수록 거대(화면 초과 가능)
+function mainCoreR(m) { return Math.max(1.5, mainGlowR(m) * 0.055); }       // 코어를 글로우 크기에 연동(더 작게)
+function mainFont(m) { return 12 + Math.pow(m.weight, 2) * 100; }          // 라벨 크기 ∝ 별 크기
+function draw(t) {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#05071a"); g.addColorStop(0.5, "#0a1030"); g.addColorStop(1, "#070a1c");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  for (const b of bg) {
+    ctx.globalAlpha = b.a * (0.6 + 0.4 * Math.sin(t * 2 + b.tw));
+    ctx.fillStyle = "#cdd9ff"; ctx.beginPath(); ctx.arc(b.x * W, b.y * H, b.r, 0, 6.28); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  // 동/서 표시
+  ctx.fillStyle = "rgba(120,140,200,.3)"; ctx.font = "13px sans-serif";
+  ctx.textAlign = "left"; ctx.fillText("서쪽 · 지는 중", 16, 26);
+  ctx.textAlign = "right"; ctx.fillText("동쪽 · 떠오름", W - 16, 26);
+
+  // 호버 대상 찾기 (위성용)
+  let hover = null, hd = 22 * 22;
+  for (const m of mains) for (const s of m.sats) {
+    const d = (mx - s.sx) ** 2 + (my - s.sy) ** 2; if (d < hd) { hd = d; hover = s; }
+  }
+
+  const drawOrder = [...mains].sort((a, b) => b.weight - a.weight); // 무거운 별 먼저(뒤) → 작은 별이 앞을 지나감
+  for (const m of drawOrder) {
+    // 중력 테더 (별-위성 연결선)
+    for (const s of m.sats) {
+      ctx.globalAlpha = 0.12 * s.alpha; ctx.strokeStyle = m.color; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(m.sx, m.sy); ctx.lineTo(s.sx, s.sy); ctx.stroke();
+    }
+    // 위성
+    m.sats.forEach((s, i) => {
+      const r = 1.5 + s.bind * 3.5;
+      ctx.globalAlpha = s.alpha; ctx.fillStyle = m.color;
+      ctx.beginPath(); ctx.arc(s.sx, s.sy, r, 0, 6.28); ctx.fill();
+      // 라벨: 상위 1~2 위성은 희미하게 항상, 나머지는 호버 시
+      if (i < 2) {
+        ctx.globalAlpha = s.alpha * 0.45; ctx.fillStyle = "#dfe6ff";
+        ctx.font = "11px -apple-system,'Noto Sans KR',sans-serif"; ctx.textAlign = "center";
+        ctx.fillText(s.title, s.sx, s.sy - r - 5);
+      } else if (s === hover) {
+        ctx.globalAlpha = 0.95; ctx.fillStyle = "#fff";
+        ctx.font = "12px -apple-system,'Noto Sans KR',sans-serif"; ctx.textAlign = "center";
+        ctx.fillText(s.title, s.sx, s.sy - r - 6);
+      }
+    });
+    // 본체 별 (무거울수록 거대 + 뒤쪽 느낌)
+    const glowR = mainGlowR(m), coreR = mainCoreR(m), tw = 0.85 + 0.15 * Math.sin(t * 3 + m.bob);
+    const gg = ctx.createRadialGradient(m.sx, m.sy, 0, m.sx, m.sy, glowR);
+    gg.addColorStop(0, m.color); gg.addColorStop(0.16, m.color + "cc"); gg.addColorStop(0.45, m.color + "44"); gg.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.globalAlpha = (0.32 + m.weight * 0.4) * m.alpha * tw; ctx.fillStyle = gg;
+    ctx.beginPath(); ctx.arc(m.sx, m.sy, glowR, 0, 6.28); ctx.fill();
+    ctx.globalAlpha = m.alpha * tw; ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(m.sx, m.sy, coreR, 0, 6.28); ctx.fill();
+    // 본체 라벨: 별 크기에 비례
+    const fs = mainFont(m);
+    ctx.globalAlpha = m.alpha * (0.7 + m.weight * 0.3); ctx.fillStyle = "#fff";
+    ctx.font = "bold " + fs + "px -apple-system,'Noto Sans KR',sans-serif"; ctx.textAlign = "center";
+    ctx.fillText(m.title, m.sx, m.sy - coreR - fs * 0.5);
+    ctx.globalAlpha = 1;
+  }
+  drawSkyline();
+}
+function drawSkyline() {
+  // 지평선 글로우
+  const hg = ctx.createLinearGradient(0, H - skylineH - 46, 0, H - skylineH);
+  hg.addColorStop(0, "rgba(70,100,180,0)"); hg.addColorStop(1, "rgba(80,110,190,.22)");
+  ctx.fillStyle = hg; ctx.fillRect(0, H - skylineH - 46, W, 46);
+  // 도시 실루엣(검정) + 창문 불빛
+  for (const b of skyline) {
+    const top = H - b.h;
+    ctx.fillStyle = "#000"; ctx.fillRect(b.x, top, b.w, b.h);
+    for (const w of b.win) if (w.on) { ctx.fillStyle = "rgba(255,214,120,.55)"; ctx.fillRect(b.x + w.wx * b.w, top + w.wy * b.h, 2, 2); }
+  }
+}
+
+// ---------- 클릭 → 문서 열기 ----------
+const postEl = document.getElementById("post");
+cv.addEventListener("click", e => {
+  let best = null, bd = Infinity, isSat = false, parent = null;
+  for (const m of mains) {
+    let d = (e.clientX - m.sx) ** 2 + (e.clientY - m.sy) ** 2;
+    let hitR = Math.max(16, mainRadius(m) * 2.5);
+    if (d < hitR * hitR && d < bd) { bd = d; best = m; isSat = false; }
+    for (const s of m.sats) {
+      d = (e.clientX - s.sx) ** 2 + (e.clientY - s.sy) ** 2;
+      if (d < 18 * 18 && d < bd) { bd = d; best = s; isSat = true; parent = m; }
+    }
+  }
+  if (best) openPost(best, isSat, parent);
+});
+function openPost(o, isSat, parent) {
+  document.getElementById("p-tag").textContent = isSat ? ("연관 문서 · 〈" + parent.title + "〉의 위성") : (o.weight > 0.85 ? "문서 · 🔥 초신성급 화제" : "문서");
+  document.getElementById("p-title").textContent = o.title;
+  document.getElementById("p-views").textContent = isSat ? "—" : (o.views ? o.views.toLocaleString() : "—");
+  document.getElementById("p-rel").textContent = isSat ? ("결속 " + Math.round(o.bind * 100) + "%") : (o.sats.length + "개 위성");
+  document.getElementById("p-link").href = "https://" + LANG + ".wikipedia.org/wiki/" + encodeURIComponent(o.title.replace(/ /g, "_"));
+  postEl.style.display = "flex";
+}
+postEl.addEventListener("click", () => postEl.style.display = "none");
+
+// ---------- 스페이스바: 누르고 있는 동안만 진행 (떼면 정지) ----------
+let playing = false;
+const playhint = document.getElementById("playhint");
+addEventListener("keydown", e => {
+  if (e.code === "Escape") postEl.style.display = "none";
+  if (e.code === "Space" && !e.repeat) { playing = true; playhint.style.opacity = "0"; e.preventDefault(); }
+});
+addEventListener("keyup", e => { if (e.code === "Space") { playing = false; playhint.style.opacity = "1"; } });
+
+// ---------- 시작 ----------
+let clock = 0, lastNow = performance.now();
+function loop(now) {
+  const real = Math.min(0.05, (now - lastNow) / 1000); lastNow = now;
+  if (playing) { const dt = real * timeScale / SLOW; clock += dt; update(dt, clock); }
+  draw(clock);
+  requestAnimationFrame(loop);
+}
+(async function init() {
+  const { list, source } = await loadData();
+  DATA = list;
+  document.getElementById("status").textContent = source + " · " + DATA.length + "개 문서";
+  // 모든 별이 동쪽(화면 밖, u<0)에서 시간차를 두고 차례로 떠오르도록 — 진입 시각을 stagger
+  for (let i = 0; i < 50; i++) { spawnNext(); const m = mains[mains.length - 1]; m.u = -(i * 0.5 + Math.random() * 0.5) * m.speed; }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
