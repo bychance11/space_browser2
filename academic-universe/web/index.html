@@ -2,14 +2,279 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8" />
-<title>Academic Universe (준비 중)</title>
-<style>body{margin:0;background:#04050d;color:#cdd9ff;font-family:sans-serif;display:flex;height:100vh;align-items:center;justify-content:center;text-align:center}</style>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Academic Universe — 학술 우주</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#03040c;color:#fff;font-family:-apple-system,"Segoe UI","Noto Sans KR",sans-serif}
+  #c{display:block;width:100%;height:100%;cursor:grab}
+  #c:active{cursor:grabbing}
+
+  #panel{position:fixed;left:14px;top:14px;z-index:6;background:rgba(14,18,40,.72);border:1px solid rgba(120,140,255,.3);
+    border-radius:12px;padding:14px 16px;font-size:12.5px;line-height:1.7;max-width:260px;backdrop-filter:blur(4px)}
+  #panel h1{font-size:15px;margin:0 0 8px}
+  #panel .row{margin:7px 0}
+  #panel label{color:#aeb6da}
+  #panel input[type=range]{width:100%}
+  #panel .fields label{display:inline-flex;align-items:center;gap:4px;margin:2px 6px 2px 0;font-size:12px;color:#dfe6ff;cursor:pointer}
+  #panel .dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+  #panel .val{color:#fff;font-weight:600}
+  #status{position:fixed;left:14px;bottom:12px;z-index:6;font-size:12px;color:#7f8cc4}
+  #hint{position:fixed;right:14px;bottom:12px;z-index:6;font-size:12px;color:#7f8cc4;text-align:right}
+  #tip{position:fixed;z-index:7;pointer-events:none;background:rgba(8,10,22,.9);border:1px solid rgba(120,140,255,.4);
+    border-radius:7px;padding:5px 9px;font-size:12px;display:none;max-width:280px}
+
+  #post{position:fixed;inset:0;z-index:30;display:none;align-items:center;justify-content:center;background:rgba(2,4,12,.72);backdrop-filter:blur(4px)}
+  #post .card{width:min(520px,90vw);background:linear-gradient(180deg,#11142a,#0a0c1a);border:1px solid rgba(120,140,255,.35);border-radius:16px;padding:24px}
+  #post .tag{font-size:12px;color:#7f8cc4}
+  #post h2{margin:8px 0 12px;font-size:20px;line-height:1.4}
+  #post .stats{display:flex;gap:20px;flex-wrap:wrap;margin-bottom:14px}
+  #post .stats div{font-size:12px;color:#aeb6da}
+  #post .stats b{display:block;font-size:19px;color:#fff;margin-top:2px}
+  #post a{display:inline-block;padding:9px 15px;border-radius:9px;text-decoration:none;font-size:13.5px;background:rgba(90,108,255,.16);border:1px solid rgba(120,140,255,.4);color:#cdd5ff}
+  #post .hint{margin-top:14px;font-size:12px;color:#6f79a8}
+</style>
 </head>
 <body>
-<div>
-  <h1>🪐 Academic Universe</h1>
-  <p>3단계(프론트엔드) 준비 중.<br>먼저 fetcher로 데이터를 모으고 processor로 universe.json을 만든 뒤 여기서 렌더합니다.</p>
+<canvas id="c"></canvas>
+
+<div id="panel">
+  <h1>🪐 학술 우주 <span id="src" style="font-size:11px;color:#7f8cc4"></span></h1>
+  <div class="row"><label>연도 ≥ <span class="val" id="yrv">2010</span></label><input id="yr" type="range" min="2010" max="2025" value="2010"></div>
+  <div class="row"><label>최소 인용수 <span class="val" id="ctv">0</span></label><input id="ct" type="range" min="0" max="2000" value="0" step="50"></div>
+  <div class="row"><label>밝기 기준</label>
+    <select id="metric" style="width:100%;background:#1a1f3d;color:#fff;border:1px solid #39406e;border-radius:6px;padding:3px">
+      <option value="cit">인용수 (명성)</option>
+      <option value="mom">모멘텀 (급부상·맥동)</option>
+    </select>
+  </div>
+  <div class="row fields" id="fields"></div>
 </div>
-<!-- TODO: Three.js 렌더 + 필터 UI. universe-<field>.json 을 fetch해서 별로 표시 -->
+
+<div id="status">불러오는 중…</div>
+<div id="hint">드래그=회전 · 휠=확대 · WASD=이동 · 별 클릭=논문</div>
+<div id="tip"></div>
+
+<div id="post"><div class="card">
+  <div class="tag" id="p-tag">논문</div>
+  <h2 id="p-title">제목</h2>
+  <div class="stats">
+    <div>인용수<b id="p-cit">0</b></div>
+    <div>연도<b id="p-yr">–</b></div>
+    <div>모멘텀<b id="p-mom">–</b></div>
+    <div>분야<b id="p-field">–</b></div>
+  </div>
+  <a id="p-link" href="#" target="_blank" rel="noopener">논문 검색 ↗</a>
+  <div class="hint">빈 곳 클릭 또는 ESC로 닫기</div>
+</div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const rand=(a,b)=>a+Math.random()*(b-a), pick=a=>a[Math.floor(Math.random()*a.length)], clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const hex=c=>"#"+c.map(v=>Math.round(v*255).toString(16).padStart(2,"0")).join("");
+
+// ---------- 분야 ----------
+const FIELDS=[
+  {name:"기계학습", color:[0.40,0.70,1.00]},
+  {name:"신경과학", color:[1.00,0.50,0.50]},
+  {name:"유전체학", color:[0.45,1.00,0.60]},
+  {name:"천체물리", color:[1.00,0.82,0.40]},
+  {name:"재료과학", color:[0.78,0.52,1.00]},
+  {name:"기후과학", color:[0.40,1.00,0.92]},
+];
+const TERMS={
+  "기계학습":["딥러닝","트랜스포머","강화학습","그래프 신경망","표현 학습","연합 학습"],
+  "신경과학":["시냅스 가소성","뇌 커넥톰","신경 부호화","해마 기억","피질 회로","뉴런 발화"],
+  "유전체학":["CRISPR 편집","단일세포 전사체","유전자 발현","후성유전","변이 분석","계통 진화"],
+  "천체물리":["블랙홀 강착","외계행성 탐사","중력파","암흑물질","은하 형성","초신성"],
+  "재료과학":["페로브스카이트","2차원 소재","고체 전해질","촉매 표면","위상 절연체","나노 구조"],
+  "기후과학":["탄소 순환","해양 순환","극지 융빙","기후 모델","에어로졸","이상기후"],
+};
+const PHRASE=["에 대한 새로운 접근","의 효율적 방법","를 위한 통합 프레임워크","의 대규모 분석","에서의 일반화","의 메커니즘 규명","기반 예측 모델","의 재현성 연구"];
+
+// ---------- 모의 데이터 생성 ----------
+function generateMock(){
+  const papers=[]; let pid=0;
+  // 분야 중심을 구면에 배치
+  FIELDS.forEach((f,fi)=>{
+    const t=fi/FIELDS.length*Math.PI*2, ph=rand(1.0,2.1);
+    const cx=2200*Math.sin(ph)*Math.cos(t), cy=2200*Math.cos(ph)*0.5, cz=2200*Math.sin(ph)*Math.sin(t);
+    const n=Math.floor(rand(55,75));
+    for(let i=0;i<n;i++){
+      let cit=Math.floor(Math.pow(Math.random(),3)*3500)+2;
+      if(Math.random()<0.04) cit=Math.floor(rand(8000,40000)); // 초거성급
+      const year=2010+Math.floor(Math.random()*16);
+      let mom=Math.pow(Math.random(),2);
+      mom=clamp(mom+(year-2010)/15*0.25,0,1);                  // 최근일수록 모멘텀↑ 경향
+      papers.push({
+        id:"M"+(pid++), field:f.name, color:f.color,
+        title:`${pick(TERMS[f.name])}${pick(PHRASE)}`,
+        cit, year, mom,
+        x:cx+rand(-520,520), y:cy+rand(-420,420), z:cz+rand(-520,520),
+      });
+    }
+  });
+  return papers;
+}
+
+async function loadData(){
+  // 실제 데이터(processor 산출물)가 있으면 사용, 없으면(또는 file://) 모의 데이터
+  try{
+    const r=await fetch("../data/universe.json",{cache:"no-store"});
+    if(r.ok){ const j=await r.json(); if(Array.isArray(j)&&j.length) return {papers:j, mock:false}; }
+  }catch(e){}
+  return {papers:generateMock(), mock:true};
+}
+
+// ---------- Three.js ----------
+const cv=document.getElementById("c"), ctx2=cv.getContext;
+const scene=new THREE.Scene(); scene.fog=new THREE.FogExp2(0x03040c,0.000055);
+const camera=new THREE.PerspectiveCamera(65,innerWidth/innerHeight,1,60000);
+const renderer=new THREE.WebGLRenderer({canvas:cv,antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.setSize(innerWidth,innerHeight); renderer.setClearColor(0x03040c,1);
+addEventListener("resize",()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+
+// 배경 별먼지
+(function(){const N=2500,p=new Float32Array(N*3);for(let i=0;i<N;i++){const r=rand(9000,30000),t=rand(0,6.28),ph=Math.acos(rand(-1,1));p[i*3]=r*Math.sin(ph)*Math.cos(t);p[i*3+1]=r*Math.sin(ph)*Math.sin(t);p[i*3+2]=r*Math.cos(ph);}const g=new THREE.BufferGeometry();g.setAttribute("position",new THREE.BufferAttribute(p,3));scene.add(new THREE.Points(g,new THREE.PointsMaterial({color:0x556099,size:1.5,sizeAttenuation:false})));})();
+
+function glowTex(){const s=64,cv=document.createElement("canvas");cv.width=cv.height=s;const x=cv.getContext("2d");const g=x.createRadialGradient(s/2,s/2,0,s/2,s/2,s/2);g.addColorStop(0,"rgba(255,255,255,1)");g.addColorStop(.25,"rgba(255,255,255,.85)");g.addColorStop(.55,"rgba(170,190,255,.25)");g.addColorStop(1,"rgba(0,0,0,0)");x.fillStyle=g;x.fillRect(0,0,s,s);const t=new THREE.Texture(cv);t.needsUpdate=true;return t;}
+
+let PAPERS=[], points=null, geo=null, maxCit=1;
+const uTime={value:0};
+
+function buildStars(papers){
+  PAPERS=papers; maxCit=Math.max(...papers.map(p=>p.cit),1);
+  const N=papers.length;
+  const pos=new Float32Array(N*3),col=new Float32Array(N*3),size=new Float32Array(N),bri=new Float32Array(N),mom=new Float32Array(N);
+  papers.forEach((p,i)=>{
+    pos[i*3]=p.x;pos[i*3+1]=p.y;pos[i*3+2]=p.z;
+    col[i*3]=p.color[0];col[i*3+1]=p.color[1];col[i*3+2]=p.color[2];
+    p._w=Math.sqrt(p.cit/maxCit);
+    size[i]=6+p._w*60; bri[i]=0.45+p._w*0.9; mom[i]=p.mom;
+  });
+  geo=new THREE.BufferGeometry();
+  geo.setAttribute("position",new THREE.BufferAttribute(pos,3));
+  geo.setAttribute("aColor",new THREE.BufferAttribute(col,3));
+  geo.setAttribute("aSize",new THREE.BufferAttribute(size,1));
+  geo.setAttribute("aBright",new THREE.BufferAttribute(bri,1));
+  geo.setAttribute("aMom",new THREE.BufferAttribute(mom,1));
+  const mat=new THREE.ShaderMaterial({
+    uniforms:{uTex:{value:glowTex()},uTime:uTime},transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
+    vertexShader:`attribute vec3 aColor;attribute float aSize;attribute float aBright;attribute float aMom;
+      uniform float uTime;varying vec3 vC;varying float vB;
+      void main(){vC=aColor;
+        float pulse=aMom*(0.5+0.5*sin(uTime*(1.0+aMom*5.0)));
+        vB=aBright+pulse*1.3;
+        vec4 mv=modelViewMatrix*vec4(position,1.0);
+        gl_PointSize=clamp(aSize*(900.0/-mv.z),0.0,320.0);
+        gl_Position=projectionMatrix*mv;}`,
+    fragmentShader:`uniform sampler2D uTex;varying vec3 vC;varying float vB;
+      void main(){vec4 t=texture2D(uTex,gl_PointCoord);if(t.a<0.01)discard;gl_FragColor=vec4(vC*vB,1.0)*t.a;}`,
+  });
+  points=new THREE.Points(geo,mat); scene.add(points);
+  buildLabels(); applyFilters();
+}
+
+// ---------- 상위 인용 라벨(스프라이트) ----------
+let labels=[];
+function makeLabel(text,color){
+  const f=24,pad=8,c=document.createElement("canvas"),x=c.getContext("2d");
+  x.font=`${f}px -apple-system,'Noto Sans KR',sans-serif`;
+  c.width=Math.ceil(x.measureText(text).width)+pad*2;c.height=f+pad*2;
+  x.font=`${f}px -apple-system,'Noto Sans KR',sans-serif`;x.fillStyle=color;x.textBaseline="middle";
+  x.shadowColor="rgba(0,0,0,.9)";x.shadowBlur=4;x.fillText(text,pad,c.height/2);
+  const t=new THREE.CanvasTexture(c);const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:t,transparent:true,depthWrite:false,depthTest:false,opacity:.9}));
+  sp.scale.set(c.width/c.height*70,70,1);return sp;
+}
+function buildLabels(){
+  labels.forEach(l=>scene.remove(l.sp)); labels=[];
+  const top=[...PAPERS].sort((a,b)=>b.cit-a.cit).slice(0,16);
+  top.forEach(p=>{const sp=makeLabel(p.title.length>22?p.title.slice(0,22)+"…":p.title,hex(p.color));
+    sp.position.set(p.x,p.y+ (10+p._w*55),p.z); scene.add(sp); labels.push({sp,p});});
+}
+
+// ---------- 필터 ----------
+const fieldOn={}; FIELDS.forEach(f=>fieldOn[f.name]=true);
+function applyFilters(){
+  if(!geo) return;
+  const yr=+document.getElementById("yr").value, ct=+document.getElementById("ct").value, metric=document.getElementById("metric").value;
+  const size=geo.attributes.aSize.array, bri=geo.attributes.aBright.array;
+  let vis=0;
+  PAPERS.forEach((p,i)=>{
+    const ok=p.year>=yr && p.cit>=ct && fieldOn[p.field];
+    p._vis=ok;
+    size[i]=ok?(6+p._w*60):0;
+    bri[i]=metric==="mom"?(0.3+p.mom*1.6):(0.45+p._w*0.9);
+    geo.attributes.aMom.array[i]=metric==="mom"?p.mom:p.mom*0.25; // 모멘텀 기준일 때 맥동 강조
+    if(ok)vis++;
+  });
+  geo.attributes.aSize.needsUpdate=true;geo.attributes.aBright.needsUpdate=true;geo.attributes.aMom.needsUpdate=true;
+  labels.forEach(l=>l.sp.visible=l.p._vis);
+  document.getElementById("status").textContent=`표시 ${vis} / 전체 ${PAPERS.length} 논문`;
+}
+["yr","ct","metric"].forEach(id=>document.getElementById(id).addEventListener("input",()=>{
+  document.getElementById("yrv").textContent=document.getElementById("yr").value;
+  document.getElementById("ctv").textContent=document.getElementById("ct").value;
+  applyFilters();
+}));
+// 분야 체크박스
+const fdiv=document.getElementById("fields");
+FIELDS.forEach(f=>{const id="f_"+f.name;const l=document.createElement("label");
+  l.innerHTML=`<input type="checkbox" id="${id}" checked><span class="dot" style="background:${hex(f.color)}"></span>${f.name}`;
+  fdiv.appendChild(l);
+  l.querySelector("input").addEventListener("change",e=>{fieldOn[f.name]=e.target.checked;applyFilters();});
+});
+
+// ---------- 궤도 카메라 ----------
+let az=0.6, pol=1.15, radius=6000; const target=new THREE.Vector3(0,0,0);
+function updateCam(){camera.position.set(target.x+radius*Math.sin(pol)*Math.cos(az),target.y+radius*Math.cos(pol),target.z+radius*Math.sin(pol)*Math.sin(az));camera.lookAt(target);}
+updateCam();
+let dragging=false,lx=0,ly=0,dx0=0,dy0=0,moved=false;
+cv.addEventListener("pointerdown",e=>{dragging=true;lx=dx0=e.clientX;ly=dy0=e.clientY;moved=false;});
+addEventListener("pointermove",e=>{
+  if(dragging){az-=(e.clientX-lx)*0.005;pol=clamp(pol-(e.clientY-ly)*0.005,0.08,3.06);lx=e.clientX;ly=e.clientY;if(Math.abs(e.clientX-dx0)+Math.abs(e.clientY-dy0)>6)moved=true;updateCam();}
+  else hover(e.clientX,e.clientY);
+});
+addEventListener("pointerup",e=>{if(dragging&&!moved)clickAt(e.clientX,e.clientY);dragging=false;});
+addEventListener("wheel",e=>{radius=clamp(radius*(1+Math.sign(e.deltaY)*0.1),700,20000);updateCam();},{passive:true});
+const keys={};addEventListener("keydown",e=>{keys[e.code]=true;if(e.code==="Escape")postEl.style.display="none";});
+addEventListener("keyup",e=>keys[e.code]=false);
+function moveTarget(){const sp=radius*0.012;const f=new THREE.Vector3();camera.getWorldDirection(f);f.y=0;f.normalize();const r=new THREE.Vector3().crossVectors(f,new THREE.Vector3(0,1,0)).normalize();
+  if(keys["KeyW"])target.addScaledVector(f,sp);if(keys["KeyS"])target.addScaledVector(f,-sp);if(keys["KeyA"])target.addScaledVector(r,-sp);if(keys["KeyD"])target.addScaledVector(r,sp);
+  if(keys["KeyW"]||keys["KeyS"]||keys["KeyA"]||keys["KeyD"])updateCam();}
+
+// ---------- 픽킹(호버/클릭) ----------
+const ray=new THREE.Raycaster(); ray.params.Points.threshold=70;
+const tip=document.getElementById("tip");
+function pickIndex(sx,sy){
+  if(!points)return -1;
+  ray.setFromCamera(new THREE.Vector2(sx/innerWidth*2-1,-(sy/innerHeight)*2+1),camera);
+  const hits=ray.intersectObject(points);
+  for(const h of hits){if(PAPERS[h.index]&&PAPERS[h.index]._vis)return h.index;}
+  return -1;
+}
+function hover(sx,sy){const i=pickIndex(sx,sy);if(i>=0){const p=PAPERS[i];tip.style.display="block";tip.style.left=(sx+12)+"px";tip.style.top=(sy+12)+"px";tip.innerHTML=`<b>${p.title}</b><br>${p.field} · 인용 ${p.cit.toLocaleString()} · ${p.year}`;}else tip.style.display="none";}
+const postEl=document.getElementById("post");
+function clickAt(sx,sy){const i=pickIndex(sx,sy);if(i<0)return;const p=PAPERS[i];
+  document.getElementById("p-tag").textContent=p.field+(p.cit>8000?" · 🌟 초거성급":"");
+  document.getElementById("p-title").textContent=p.title;
+  document.getElementById("p-cit").textContent=p.cit.toLocaleString();
+  document.getElementById("p-yr").textContent=p.year;
+  document.getElementById("p-mom").textContent=Math.round(p.mom*100)+"%";
+  document.getElementById("p-field").textContent=p.field;
+  document.getElementById("p-link").href="https://scholar.google.com/scholar?q="+encodeURIComponent(p.title);
+  postEl.style.display="flex";}
+postEl.addEventListener("click",()=>postEl.style.display="none");
+
+// ---------- 루프 ----------
+let last=performance.now();
+function loop(now){const dt=(now-last)/1000;last=now;uTime.value+=dt;moveTarget();renderer.render(scene,camera);requestAnimationFrame(loop);}
+
+(async function init(){
+  const {papers,mock}=await loadData();
+  document.getElementById("src").textContent=mock?"· 모의 데이터":"· 실제 데이터";
+  buildStars(papers);
+  requestAnimationFrame(loop);
+})();
+</script>
 </body>
 </html>
