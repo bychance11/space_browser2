@@ -22,6 +22,12 @@
   #hint{position:fixed;right:14px;bottom:12px;z-index:6;font-size:12px;color:#7f8cc4;text-align:right}
   #tip{position:fixed;z-index:7;pointer-events:none;background:rgba(8,10,22,.9);border:1px solid rgba(120,140,255,.4);
     border-radius:7px;padding:5px 9px;font-size:12px;display:none;max-width:280px}
+  #cross{position:fixed;left:50%;top:50%;width:18px;height:18px;transform:translate(-50%,-50%);z-index:5;pointer-events:none;opacity:.65}
+  #cross::before,#cross::after{content:"";position:absolute;background:rgba(255,255,255,.85)}
+  #cross::before{left:50%;top:0;width:1px;height:100%;transform:translateX(-50%)}
+  #cross::after{top:50%;left:0;height:1px;width:100%;transform:translateY(-50%)}
+  #engage{position:fixed;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;pointer-events:none}
+  #engage span{background:rgba(14,18,40,.62);border:1px solid rgba(120,140,255,.45);border-radius:999px;padding:10px 22px;color:#cdd9ff;font-size:15px}
 
   #post{position:fixed;inset:0;z-index:30;display:none;align-items:center;justify-content:center;background:rgba(2,4,12,.72);backdrop-filter:blur(4px)}
   #post .card{width:min(520px,90vw);background:linear-gradient(180deg,#11142a,#0a0c1a);border:1px solid rgba(120,140,255,.35);border-radius:16px;padding:24px}
@@ -36,6 +42,8 @@
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="cross"></div>
+<div id="engage"><span>화면을 클릭하면 비행 시작 ▶</span></div>
 
 <div id="panel">
   <h1>🪐 학술 우주 <span id="src" style="font-size:11px;color:#7f8cc4"></span></h1>
@@ -51,7 +59,7 @@
 </div>
 
 <div id="status">불러오는 중…</div>
-<div id="hint">드래그=회전 · 휠=확대 · WASD=이동 · 별 클릭=논문</div>
+<div id="hint">클릭=비행시작 · 마우스=시점 · WASD=비행 · Space/C=상하 · 휠=속도 · <b>Shift</b>=커서(포인터) · ESC=커서</div>
 <div id="tip"></div>
 
 <div id="post"><div class="card">
@@ -94,22 +102,25 @@ const PHRASE=["에 대한 새로운 접근","의 효율적 방법","를 위한 �
 // ---------- 모의 데이터 생성 ----------
 function generateMock(){
   const papers=[]; let pid=0;
-  // 분야 중심을 구면에 배치
+  const DIRS=[[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]; // 6방향(상하·좌우·앞뒤)
+  const RGAL=1900, SPREAD=1450;   // 은하 간격은 좁게, 별 산포는 넓게 → 사방에 별
+  // 분야 중심을 6방향으로 배치(사용자는 군집 중심)
   FIELDS.forEach((f,fi)=>{
-    const t=fi/FIELDS.length*Math.PI*2, ph=rand(1.0,2.1);
-    const cx=2200*Math.sin(ph)*Math.cos(t), cy=2200*Math.cos(ph)*0.5, cz=2200*Math.sin(ph)*Math.sin(t);
-    const n=Math.floor(rand(55,75));
+    const d=DIRS[fi%DIRS.length];
+    const cx=d[0]*RGAL, cy=d[1]*RGAL, cz=d[2]*RGAL;
+    const n=Math.floor(rand(1100,1500));   // 분야당 약 20배 → 장관
     for(let i=0;i<n;i++){
       let cit=Math.floor(Math.pow(Math.random(),3)*3500)+2;
-      if(Math.random()<0.04) cit=Math.floor(rand(8000,40000)); // 초거성급
+      if(Math.random()<0.012) cit=Math.floor(rand(8000,60000)); // 초거성급(희귀·거대)
       const year=2010+Math.floor(Math.random()*16);
       let mom=Math.pow(Math.random(),2);
       mom=clamp(mom+(year-2010)/15*0.25,0,1);                  // 최근일수록 모멘텀↑ 경향
+      const rr=SPREAD*Math.cbrt(Math.random()), th=rand(0,6.283), cph=rand(-1,1), sph=Math.sqrt(1-cph*cph);
       papers.push({
         id:"M"+(pid++), field:f.name, color:f.color,
         title:`${pick(TERMS[f.name])}${pick(PHRASE)}`,
         cit, year, mom,
-        x:cx+rand(-520,520), y:cy+rand(-420,420), z:cz+rand(-520,520),
+        x:cx+rr*sph*Math.cos(th), y:cy+rr*sph*Math.sin(th), z:cz+rr*cph,
       });
     }
   });
@@ -149,7 +160,7 @@ function buildStars(papers){
     pos[i*3]=p.x;pos[i*3+1]=p.y;pos[i*3+2]=p.z;
     col[i*3]=p.color[0];col[i*3+1]=p.color[1];col[i*3+2]=p.color[2];
     p._w=Math.sqrt(p.cit/maxCit);
-    size[i]=6+p._w*60; bri[i]=0.45+p._w*0.9; mom[i]=p.mom;
+    size[i]=8+Math.pow(p._w,3)*900; bri[i]=0.45+p._w*0.9; mom[i]=p.mom; // 매우 중요한 별은 최대 ~10배
   });
   geo=new THREE.BufferGeometry();
   geo.setAttribute("position",new THREE.BufferAttribute(pos,3));
@@ -165,7 +176,7 @@ function buildStars(papers){
         float pulse=aMom*(0.5+0.5*sin(uTime*(1.0+aMom*5.0)));
         vB=aBright+pulse*1.3;
         vec4 mv=modelViewMatrix*vec4(position,1.0);
-        gl_PointSize=clamp(aSize*(900.0/-mv.z),0.0,320.0);
+        gl_PointSize=clamp(aSize*(900.0/-mv.z),0.0,1000.0);
         gl_Position=projectionMatrix*mv;}`,
     fragmentShader:`uniform sampler2D uTex;varying vec3 vC;varying float vB;
       void main(){vec4 t=texture2D(uTex,gl_PointCoord);if(t.a<0.01)discard;gl_FragColor=vec4(vC*vB,1.0)*t.a;}`,
@@ -187,9 +198,9 @@ function makeLabel(text,color){
 }
 function buildLabels(){
   labels.forEach(l=>scene.remove(l.sp)); labels=[];
-  const top=[...PAPERS].sort((a,b)=>b.cit-a.cit).slice(0,16);
+  const top=[...PAPERS].sort((a,b)=>b.cit-a.cit).slice(0,22);
   top.forEach(p=>{const sp=makeLabel(p.title.length>22?p.title.slice(0,22)+"…":p.title,hex(p.color));
-    sp.position.set(p.x,p.y+ (10+p._w*55),p.z); scene.add(sp); labels.push({sp,p});});
+    sp.position.set(p.x,p.y+(30+p._w*220),p.z); scene.add(sp); labels.push({sp,p});});
 }
 
 // ---------- 필터 ----------
@@ -202,7 +213,7 @@ function applyFilters(){
   PAPERS.forEach((p,i)=>{
     const ok=p.year>=yr && p.cit>=ct && fieldOn[p.field];
     p._vis=ok;
-    size[i]=ok?(6+p._w*60):0;
+    size[i]=ok?(8+Math.pow(p._w,3)*900):0;
     bri[i]=metric==="mom"?(0.3+p.mom*1.6):(0.45+p._w*0.9);
     geo.attributes.aMom.array[i]=metric==="mom"?p.mom:p.mom*0.25; // 모멘텀 기준일 때 맥동 강조
     if(ok)vis++;
@@ -224,26 +235,61 @@ FIELDS.forEach(f=>{const id="f_"+f.name;const l=document.createElement("label");
   l.querySelector("input").addEventListener("change",e=>{fieldOn[f.name]=e.target.checked;applyFilters();});
 });
 
-// ---------- 궤도 카메라 ----------
-let az=0.6, pol=1.15, radius=6000; const target=new THREE.Vector3(0,0,0);
-function updateCam(){camera.position.set(target.x+radius*Math.sin(pol)*Math.cos(az),target.y+radius*Math.cos(pol),target.z+radius*Math.sin(pol)*Math.sin(az));camera.lookAt(target);}
-updateCam();
-let dragging=false,lx=0,ly=0,dx0=0,dy0=0,moved=false;
-cv.addEventListener("pointerdown",e=>{dragging=true;lx=dx0=e.clientX;ly=dy0=e.clientY;moved=false;});
+// ---------- 1인칭 비행 카메라 (우주 유영) ----------
+let yaw=0, pitch=0, speed=2200;                // speed = 초당 이동거리(휠로 조절)
+camera.position.set(0,0,0);                    // 은하 군집의 중심에서 시작
+function applyLook(){camera.quaternion.setFromEuler(new THREE.Euler(pitch,yaw,0,"YXZ"));}
+applyLook();
+const keys={};
+let shiftHeld=false, locked=false;
+function updateUI(){
+  document.getElementById("cross").style.display = locked ? "block" : "none";
+  document.getElementById("engage").style.display = (!locked && !shiftHeld) ? "flex" : "none";
+}
+document.addEventListener("pointerlockchange",()=>{ locked=(document.pointerLockElement===cv); updateUI(); });
+addEventListener("keydown",e=>{keys[e.code]=true;if(e.code==="Escape")postEl.style.display="none";if(e.key==="Shift"){shiftHeld=true;if(locked)document.exitPointerLock();updateUI();}});
+addEventListener("keyup",e=>{keys[e.code]=false;if(e.key==="Shift"){shiftHeld=false;updateUI();}});
+updateUI();
+
+let lx=0,ly=0,haveLast=false,dragging=false,moved=false,dx0=0,dy0=0;
+function overUI(t){return t&&t.closest&&t.closest("#panel,#post");}
+cv.addEventListener("pointerdown",e=>{dragging=true;dx0=e.clientX;dy0=e.clientY;moved=false;});
+
 addEventListener("pointermove",e=>{
-  if(dragging){az-=(e.clientX-lx)*0.005;pol=clamp(pol-(e.clientY-ly)*0.005,0.08,3.06);lx=e.clientX;ly=e.clientY;if(Math.abs(e.clientX-dx0)+Math.abs(e.clientY-dy0)>6)moved=true;updateCam();}
-  else hover(e.clientX,e.clientY);
+  if(locked){ // 비행: 포인터 잠금 → 마우스로 자유 시점 (커서 숨김, 중앙 십자선)
+    yaw-=e.movementX*0.0022; pitch=clamp(pitch-e.movementY*0.0022,-1.5,1.5); applyLook(); hoverCenter(); return;
+  }
+  if(overUI(e.target)){haveLast=false;tip.style.display="none";return;}
+  const x=e.clientX,y=e.clientY;
+  if(haveLast){
+    if(Math.abs(x-dx0)+Math.abs(y-dy0)>6)moved=true;
+    if(shiftHeld && dragging){ yaw-=(x-lx)*0.0042; pitch=clamp(pitch-(y-ly)*0.0042,-1.5,1.5); applyLook(); } // 포인터 모드: 드래그로 회전
+  }
+  lx=x;ly=y;haveLast=true;
+  if(shiftHeld) hover(x,y); else tip.style.display="none";
 });
-addEventListener("pointerup",e=>{if(dragging&&!moved)clickAt(e.clientX,e.clientY);dragging=false;});
-addEventListener("wheel",e=>{radius=clamp(radius*(1+Math.sign(e.deltaY)*0.1),700,20000);updateCam();},{passive:true});
-const keys={};addEventListener("keydown",e=>{keys[e.code]=true;if(e.code==="Escape")postEl.style.display="none";});
-addEventListener("keyup",e=>keys[e.code]=false);
-function moveTarget(){const sp=radius*0.012;const f=new THREE.Vector3();camera.getWorldDirection(f);f.y=0;f.normalize();const r=new THREE.Vector3().crossVectors(f,new THREE.Vector3(0,1,0)).normalize();
-  if(keys["KeyW"])target.addScaledVector(f,sp);if(keys["KeyS"])target.addScaledVector(f,-sp);if(keys["KeyA"])target.addScaledVector(r,-sp);if(keys["KeyD"])target.addScaledVector(r,sp);
-  if(keys["KeyW"]||keys["KeyS"]||keys["KeyA"]||keys["KeyD"])updateCam();}
+addEventListener("pointerup",e=>{
+  if(locked){ if(!moved) clickAt(innerWidth/2,innerHeight/2); dragging=false; return; }   // 비행: 중앙 별 선택
+  if(shiftHeld){ if(!moved) clickAt(e.clientX,e.clientY); dragging=false; return; }        // 포인터: 커서 아래 별
+  if(!overUI(e.target) && postEl.style.display!=="flex") cv.requestPointerLock();            // 미잠금: 클릭=비행 시작
+  dragging=false;
+});
+addEventListener("wheel",e=>{speed=clamp(speed*(1-Math.sign(e.deltaY)*0.15),400,16000);},{passive:true});
+
+const _f=new THREE.Vector3(), _r=new THREE.Vector3(), _up=new THREE.Vector3(0,1,0);
+function fly(dt){
+  const sp=speed*dt;
+  camera.getWorldDirection(_f); _r.crossVectors(_f,_up).normalize();
+  if(keys["KeyW"])camera.position.addScaledVector(_f,sp);
+  if(keys["KeyS"])camera.position.addScaledVector(_f,-sp);
+  if(keys["KeyA"])camera.position.addScaledVector(_r,-sp);
+  if(keys["KeyD"])camera.position.addScaledVector(_r,sp);
+  if(keys["Space"])camera.position.y+=sp;
+  if(keys["KeyC"])camera.position.y-=sp;
+}
 
 // ---------- 픽킹(호버/클릭) ----------
-const ray=new THREE.Raycaster(); ray.params.Points.threshold=70;
+const ray=new THREE.Raycaster(); ray.params.Points.threshold=120;
 const tip=document.getElementById("tip");
 function pickIndex(sx,sy){
   if(!points)return -1;
@@ -252,9 +298,12 @@ function pickIndex(sx,sy){
   for(const h of hits){if(PAPERS[h.index]&&PAPERS[h.index]._vis)return h.index;}
   return -1;
 }
-function hover(sx,sy){const i=pickIndex(sx,sy);if(i>=0){const p=PAPERS[i];tip.style.display="block";tip.style.left=(sx+12)+"px";tip.style.top=(sy+12)+"px";tip.innerHTML=`<b>${p.title}</b><br>${p.field} · 인용 ${p.cit.toLocaleString()} · ${p.year}`;}else tip.style.display="none";}
+function tipHTML(p){return `<b>${p.title}</b><br>${p.field} · 인용 ${p.cit.toLocaleString()} · ${p.year}`;}
+function hover(sx,sy){const i=pickIndex(sx,sy);if(i>=0){const p=PAPERS[i];tip.style.display="block";tip.style.transform="";tip.style.left=(sx+12)+"px";tip.style.top=(sy+12)+"px";tip.innerHTML=tipHTML(p);}else tip.style.display="none";}
+function hoverCenter(){const i=pickIndex(innerWidth/2,innerHeight/2);if(i>=0){const p=PAPERS[i];tip.style.display="block";tip.style.left="50%";tip.style.top="58%";tip.style.transform="translateX(-50%)";tip.innerHTML=tipHTML(p);}else{tip.style.display="none";}}
 const postEl=document.getElementById("post");
 function clickAt(sx,sy){const i=pickIndex(sx,sy);if(i<0)return;const p=PAPERS[i];
+  if(document.pointerLockElement)document.exitPointerLock(); // 논문 열 때 커서 복귀(패널 조작용)
   document.getElementById("p-tag").textContent=p.field+(p.cit>8000?" · 🌟 초거성급":"");
   document.getElementById("p-title").textContent=p.title;
   document.getElementById("p-cit").textContent=p.cit.toLocaleString();
@@ -267,7 +316,7 @@ postEl.addEventListener("click",()=>postEl.style.display="none");
 
 // ---------- 루프 ----------
 let last=performance.now();
-function loop(now){const dt=(now-last)/1000;last=now;uTime.value+=dt;moveTarget();renderer.render(scene,camera);requestAnimationFrame(loop);}
+function loop(now){const dt=Math.min(0.05,(now-last)/1000);last=now;uTime.value+=dt;fly(dt);renderer.render(scene,camera);requestAnimationFrame(loop);}
 
 (async function init(){
   const {papers,mock}=await loadData();
