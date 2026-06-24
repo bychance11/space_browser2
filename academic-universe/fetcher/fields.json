@@ -1,0 +1,11 @@
+{
+  "mailto": "chanyang9@hanwha.com",
+  "queries": [
+    {
+      "name": "machine-learning",
+      "search": "machine learning",
+      "from_year": 2018,
+      "max_records": 600
+    }
+  ]
+}
