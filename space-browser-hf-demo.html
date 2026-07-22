@@ -65,7 +65,10 @@
   #entry{position:fixed; inset:0; z-index:40; display:flex; align-items:center; justify-content:center; background:radial-gradient(ellipse at 50% 40%, rgba(10,16,40,.92), rgba(4,6,15,.97))}
   .ecard{max-width:520px; padding:44px 48px; text-align:center; border:1px solid rgba(255,255,255,.1); border-radius:24px; background:rgba(12,16,32,.6); backdrop-filter:blur(20px); box-shadow:0 20px 80px rgba(0,0,0,.5)}
   .ecard h1{font-size:30px; font-weight:800; letter-spacing:.02em; margin-bottom:14px; color:#eef2ff}
-  .ecard p{font-size:14px; line-height:1.75; color:#9fb0d8; margin-bottom:26px}
+  .ecard p{font-size:14px; line-height:1.8; color:#9fb0d8; margin-bottom:22px}
+  .econtrols{display:inline-block; text-align:left; margin:0 auto 26px}
+  .ctrl{display:flex; gap:12px; align-items:center; margin:8px 0; font-size:12.5px; color:#93a3c8}
+  .kbd{flex:none; min-width:96px; text-align:center; padding:4px 12px; border:1px solid rgba(255,255,255,.18); border-bottom-width:2px; border-radius:8px; background:rgba(255,255,255,.05); font-size:11.5px; font-weight:600; color:#c7d4f5; white-space:nowrap}
   .elangs{display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-bottom:26px}
   .elang{padding:7px 16px; border:1px solid rgba(255,255,255,.14); border-radius:999px; font-size:13px; color:#aab8dd; cursor:pointer; user-select:none}
   .elang.on{color:#8ab8ff; border-color:#8ab8ff; background:rgba(96,140,255,.14)}
@@ -95,7 +98,7 @@
   <div class="ecard">
     <h1>🤗 Space Browser</h1>
     <p id="ePurpose"></p>
-    <p id="eControls" style="font-size:12px; color:#7f8fb8; line-height:1.8; margin-top:-12px; margin-bottom:26px"></p>
+    <div id="eControls" class="econtrols"></div>
     <div class="elangs" id="eLangs">
       <span class="elang on" data-l="en">English</span>
       <span class="elang" data-l="ko">한국어</span>
@@ -1070,8 +1073,14 @@ function applyLang(l){
   LANG = l; T = I18N[l] || I18N.en;
   try{ localStorage.setItem('sbLang', l); }catch(e){}
   document.documentElement.lang = l;
-  document.getElementById('ePurpose').textContent = T.purpose;
-  document.getElementById('eControls').textContent = T.controls;
+  // 목적: 문장 단위 줄바꿈 / 조작법: 키캡 표 형태
+  document.getElementById('ePurpose').innerHTML =
+    T.purpose.replace(/。\s*/g,'。<br>').replace(/\.\s+/g,'.<br>');
+  document.getElementById('eControls').innerHTML =
+    T.controls.replace(/[🖱⌨]\s*/g,'').split(' · ').map(it=>{
+      const p = it.split(/\s*=\s*/);
+      return `<div class="ctrl"><span class="kbd">${p[0]}</span><span>${p.slice(1).join('=')}</span></div>`;
+    }).join('');
   document.getElementById('eStart').textContent = T.start;
   document.getElementById('loadTitle').textContent = T.loading;
   const lm = document.getElementById('loadMsg'); if(lm) lm.textContent = T.loadingSub;
