@@ -99,6 +99,10 @@ const DOMAINS = [ // 백우주(응용 도메인) 은하 — 태그/이름/README
   {key:'gen',   name:'일반·범용',      center:[  0,  0,  0],  hue:30},
 ];
 const PER_TASK = 50, TREND_N = 10, DUST_N = 12000, TRANS_MS = 5000;
+const SPREAD = 1.55; // 우주 전체 스케일 — 은하 간격을 넓혀 방대하게
+TASKS.forEach(t=>t.center=t.center.map(v=>v*SPREAD));
+DOMAINS.forEach(d=>d.center=d.center.map(v=>v*SPREAD));
+const fr = x => x - Math.floor(x);
 
 /* ================= 도메인 추론 ================= */
 function inferDomain(m){
@@ -171,26 +175,64 @@ async function loadData(){
   });
 }
 function rankBoost(r){ return r===0? 130 : r<5? 85-9*r : 0; } // 1위=지구급(반지름 5배), 2~5위=위성은하급
-function starSize(m){
-  if(m.planet) return Math.max(rankBoost(m.rankA), rankBoost(m.rankB));
-  // 일반 별: 다운로드·좋아요 중 높은 쪽 → 1.2(별먼지급) ~ 14(중간 항성)
+function baseSize(m){ // 일반 별: 다운로드·좋아요 중 높은 쪽 → 1.2(별먼지급) ~ 14(중간 항성)
   const t = Math.max(Math.min(1, Math.log10(m.dl+1)/8.3), Math.min(1, Math.log10(m.likes+1)/4.8));
   return 1.2 + Math.pow(t, 1.8)*13;
 }
-function layoutUniverse(which){ // 은하마다: 트렌딩 1위=중심, 2~5위=외곽 위성은하, 나머지=원반
+function starSize(m){
+  return m.planet? Math.max(rankBoost(m.rankA), rankBoost(m.rankB)) : baseSize(m);
+}
+function affinity(a,b){ // 배치용 연관성 (중력 역할)
+  let s=0;
+  if(a.family===b.family || a.family===b.id || b.family===a.id) s+=6;
+  if(a.author===b.author) s+=3;
+  a.datasets.forEach(x=>{ if(b.datasets.has(x)) s+=1.5; });
+  let ov=0; a.info.forEach(x=>{ if(b.info.has(x)) ov++; }); s+=Math.min(ov,4)*.3;
+  return s;
+}
+function layoutUniverse(which){ // 유사 중력 배치: 행성(트렌딩) → 중간 항성(넓게) → 작은 별(항성의 위성)
   const GAL = which==='A'? TASKS : DOMAINS;
   GAL.forEach((gal,g)=>{
     const list = STARS.filter(m=> (which==='A'?m.gA:m.gB)===g)
                       .sort((a,b)=> (b.trend-a.trend) || (b.dl-a.dl));
     const ang = g*2.4 + (which==='A'?0:1.3);
-    const satC = [gal.center[0]+Math.cos(ang)*68, gal.center[1]+12, gal.center[2]+Math.sin(ang)*68];
-    list.forEach((m,i)=>{
+    const satC = [gal.center[0]+Math.cos(ang)*100, gal.center[1]+16, gal.center[2]+Math.sin(ang)*100];
+    const setPos=(m,i,p)=>{ if(which==='A'){m.posA=p; m.rankA=i;} else {m.posB=p; m.rankB=i;} };
+    // 1) 행성: 1위=은하 중심, 2~5위=외곽 위성은하
+    list.slice(0,5).forEach((m,i)=>{
       let p;
       if(i===0) p = gal.center.map(v=>v+(m.seed-.5)*4);
-      else if(i<5){ const a2=i*1.57+m.seed*6.28;
-        p = [satC[0]+Math.cos(a2)*(7+i*2), satC[1]+(m.seed-.5)*8, satC[2]+Math.sin(a2)*(7+i*2)];
-      } else p = discPos(gal.center, i-5, list.length, m.seed);
-      if(which==='A'){ m.posA=p; m.rankA=i; } else { m.posB=p; m.rankB=i; }
+      else { const a2=i*1.57+m.seed*6.28;
+        p = [satC[0]+Math.cos(a2)*(9+i*2.5), satC[1]+(m.seed-.5)*10, satC[2]+Math.sin(a2)*(9+i*2.5)];
+      }
+      setPos(m,i,p);
+    });
+    // 2) 중간 항성 = 앵커: 서로 넓게 벌려 배치
+    const others = list.slice(5);
+    let anchors = others.filter(m=>baseSize(m)>6.5).slice(0,10);
+    if(anchors.length<4) anchors = others.slice(0, Math.min(4, others.length));
+    const aset = new Set(anchors);
+    const aPos = anchors.map((m,i)=>{
+      const r = 36 + 60*Math.pow(i/Math.max(anchors.length-1,1), .8);
+      const a2 = i*2.399963 + m.seed*.8;
+      return [gal.center[0]+r*Math.cos(a2), gal.center[1]+(m.seed-.5)*2*(6+r*.14), gal.center[2]+r*Math.sin(a2)];
+    });
+    anchors.forEach((m,i)=>setPos(m, 5+i, aPos[i]));
+    // 3) 작은 별: 연관성 높은 항성의 "중력"에 잡혀 위성 궤도, 무연고면 외곽 헤일로
+    let idx = 5 + anchors.length;
+    others.forEach(m=>{
+      if(aset.has(m)) return;
+      let bi=-1, bs=0;
+      anchors.forEach((anc,i)=>{ const s=affinity(m,anc); if(s>bs){bs=s; bi=i;} });
+      let p;
+      if(bi>=0 && bs>0){
+        const th=m.seed*6.28, rr=5.5+m.seed*10;
+        p = [aPos[bi][0]+Math.cos(th)*rr, aPos[bi][1]+(fr(m.seed*13.7)-.5)*rr*.8, aPos[bi][2]+Math.sin(th)*rr];
+      } else {
+        const th=m.seed*6.28, rr=80+45*fr(m.seed*7.3);
+        p = [gal.center[0]+Math.cos(th)*rr, gal.center[1]+(fr(m.seed*3.1)-.5)*28, gal.center[2]+Math.sin(th)*rr];
+      }
+      setPos(m, idx++, p);
     });
   });
 }
@@ -546,7 +588,7 @@ function projectLabels(){
 }
 
 /* ================= 카메라/조작 ================= */
-let sph = {r:440, th:0, ph:1.35}, drag=null, camAnim=null;
+let sph = {r:700, th:0, ph:1.35}, drag=null, camAnim=null;
 function applyCam(){
   camera.position.set(
     target.x + sph.r*Math.sin(sph.ph)*Math.sin(sph.th),
@@ -582,7 +624,7 @@ addEventListener('pointerup',e=>{
   }
   drag=null;
 });
-canvas.addEventListener('wheel',e=>{ sph.r=Math.max(40,Math.min(1500,sph.r*(1+e.deltaY*.001))); camAnim=null; applyCam(); },{passive:true});
+canvas.addEventListener('wheel',e=>{ sph.r=Math.max(40,Math.min(2400,sph.r*(1+e.deltaY*.001))); camAnim=null; applyCam(); },{passive:true});
 /* ---- WASD 우주 유영 (Shift = 가속) ---- */
 const keys={};
 addEventListener('keydown',e=>{ if(document.activeElement && document.activeElement.tagName==='INPUT') return; keys[e.key.toLowerCase()]=true; });
@@ -639,6 +681,10 @@ async function startAtTrending(){
     if(!Array.isArray(list) || !list.length) return;
     const raw = list[0];
     const m = STARS.find(x=>x.id===raw.id) || placeExternal(parseModel(raw));
+    if(!m.planet){ // 글로벌 트렌딩 1위는 무조건 행성급으로 승격
+      m.planet=1; m.heat=1; m.size=rankBoost(0);
+      scene.remove(starPoints); starPoints = buildPoints(STARS,1);
+    }
     select(m); syncStarLabels();
     const hint=document.getElementById('hint');
     hint.innerHTML = `🔥 지금 가장 핫한 별에서 시작: <b>${m.id}</b> | 클릭=이동 · Ctrl+클릭=HF 열기 · WASD=유영`;
