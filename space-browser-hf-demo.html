@@ -361,6 +361,35 @@ function flyTo(m){
   camAnim = {t0:performance.now(), from:target.clone(), to, r0:sph.r, r1:Math.max(70, m.size*14)};
 }
 
+/* ================= 외부 모델 즉석 배치 ================= */
+function placeExternal(m){ // 수집 목록에 없는 모델을 계보 가문 옆(없으면 태스크 은하)에 추가
+  const parent = STARS.find(x=>x.id===m.family || x.family===m.family);
+  m.gA = Math.max(0, TASKS.findIndex(t=>t.tag===m.pipe));
+  m.gB = DOMAINS.findIndex(d=>d.key===inferDomain(m));
+  m.seed=rng(); m.rankA=PER_TASK; m.rankB=30;
+  m.posA = parent? parent.posA.map(v=>v+(rng()-.5)*18) : discPos(TASKS[m.gA].center, 60, PER_TASK, m.seed);
+  m.posB = parent? parent.posB.map(v=>v+(rng()-.5)*18) : discPos(DOMAINS[m.gB].center, 30, 60, m.seed);
+  m.size = 2.2+Math.min(1,Math.log10(m.dl+1)/8.2)*7.5;
+  m.delay = .3+m.seed*.2;
+  m.colA = hsl(TASKS[m.gA].hue,.75,.72); m.colB = hsl(DOMAINS[m.gB].hue,.8,.34);
+  STARS.push(m);
+  scene.remove(starPoints); starPoints = buildPoints(STARS, 1); // 재빌드(데모 규모라 즉시)
+  return m;
+}
+
+/* ================= 시작점: 지금 가장 핫한 모델 ================= */
+async function startAtTrending(){
+  try{
+    const list = await (await fetch('https://huggingface.co/api/models?sort=trendingScore&limit=5')).json();
+    if(!Array.isArray(list) || !list.length) return;
+    const raw = list[0];
+    const m = STARS.find(x=>x.id===raw.id) || placeExternal(parseModel(raw));
+    select(m); syncStarLabels();
+    const hint=document.getElementById('hint');
+    hint.innerHTML = `🔥 지금 가장 핫한 별에서 시작: <b>${m.id}</b> · 드래그 회전 · 휠 줌 · 별 클릭 = 선택`;
+  }catch(e){ /* 트렌딩 실패 시 그냥 전체 뷰에서 시작 */ }
+}
+
 /* ================= 검색 ================= */
 async function search(){
   let q=document.getElementById('q').value.trim();
@@ -373,19 +402,7 @@ async function search(){
     try{
       const raw = await (await fetch('https://huggingface.co/api/models/'+q)).json();
       if(!raw.id) throw 0;
-      m = parseModel(raw);
-      const parent = STARS.find(x=>x.id===m.family || x.family===m.family);
-      m.gA = Math.max(0, TASKS.findIndex(t=>t.tag===m.pipe)); if(m.gA<0) m.gA=0;
-      m.gB = DOMAINS.findIndex(d=>d.key===inferDomain(m));
-      m.seed=rng(); m.rankA=PER_TASK; m.rankB=30;
-      const base = parent||null;
-      m.posA = base? base.posA.map(v=>v+(rng()-.5)*18) : discPos(TASKS[m.gA].center, 60, PER_TASK, m.seed);
-      m.posB = base? base.posB.map(v=>v+(rng()-.5)*18) : discPos(DOMAINS[m.gB].center, 30, 60, m.seed);
-      m.size = 2.2+Math.min(1,Math.log10(m.dl+1)/8.2)*7.5;
-      m.delay = .3+m.seed*.2;
-      m.colA = hsl(TASKS[m.gA].hue,.75,.72); m.colB = hsl(DOMAINS[m.gB].hue,.8,.34);
-      STARS.push(m);
-      scene.remove(starPoints); starPoints = buildPoints(STARS, 1); // 재빌드(데모 규모라 즉시)
+      m = placeExternal(parseModel(raw));
     }catch(e){ alert('모델을 찾지 못했어요: '+q); return; }
   }
   select(m); syncStarLabels();
@@ -443,6 +460,7 @@ addEventListener('resize',resize);
   buildDust();
   makeLabels(); resize(); applyCam();
   requestAnimationFrame(animate);
+  startAtTrending(); // 시작 = 현재 트렌딩 1위 모델로 플라이인
 })();
 </script>
 </body>
