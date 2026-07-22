@@ -62,6 +62,15 @@
   #related .rsum{color:var(--fg-dim); font-size:11px}
   #hint{top:72px; left:50%; transform:translateX(-50%); font-size:11px; color:var(--fg-dim); z-index:9; padding:5px 14px; border-radius:999px; letter-spacing:.01em}
   #loading{position:fixed; inset:0; display:flex; flex-direction:column; gap:12px; align-items:center; justify-content:center; z-index:20; color:#9fb3dd; font-size:14px; background:#04060f}
+  #entry{position:fixed; inset:0; z-index:40; display:flex; align-items:center; justify-content:center; background:radial-gradient(ellipse at 50% 40%, rgba(10,16,40,.92), rgba(4,6,15,.97))}
+  .ecard{max-width:520px; padding:44px 48px; text-align:center; border:1px solid rgba(255,255,255,.1); border-radius:24px; background:rgba(12,16,32,.6); backdrop-filter:blur(20px); box-shadow:0 20px 80px rgba(0,0,0,.5)}
+  .ecard h1{font-size:30px; font-weight:800; letter-spacing:.02em; margin-bottom:14px; color:#eef2ff}
+  .ecard p{font-size:14px; line-height:1.75; color:#9fb0d8; margin-bottom:26px}
+  .elangs{display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-bottom:26px}
+  .elang{padding:7px 16px; border:1px solid rgba(255,255,255,.14); border-radius:999px; font-size:13px; color:#aab8dd; cursor:pointer; user-select:none}
+  .elang.on{color:#8ab8ff; border-color:#8ab8ff; background:rgba(96,140,255,.14)}
+  #eStart{font-size:15px; font-weight:700; padding:12px 46px; border-radius:999px; border:1px solid #8ab8ff; color:#eef2ff; background:linear-gradient(135deg, rgba(96,140,255,.35), rgba(140,96,255,.3)); cursor:pointer}
+  #eStart:hover{box-shadow:0 0 30px rgba(96,140,255,.45)}
   .lbl{position:fixed; transform:translate(-50%,-130%); font-size:11px; pointer-events:none; white-space:nowrap; color:var(--fg); text-shadow:0 0 6px rgba(0,0,0,.5); z-index:5}
   body.light .lbl{text-shadow:0 0 6px rgba(255,255,255,.7)}
   .glbl{position:fixed; transform:translate(-50%, calc(-50% + 36px)); font-size:60px; font-weight:800; letter-spacing:.22em; pointer-events:none; white-space:nowrap; color:var(--fg-dim); opacity:.38; z-index:1; transition:opacity 2.5s; text-transform:uppercase}
@@ -82,7 +91,22 @@
 </head>
 <body class="dark">
 <canvas id="c"></canvas>
-<div id="loading"><div>HuggingFace 우주 생성 중…</div><div id="loadMsg" style="font-size:12px;color:#5f6f95">모델 메타데이터 수집</div></div>
+<div id="entry">
+  <div class="ecard">
+    <h1>🤗 Space Browser</h1>
+    <p id="ePurpose"></p>
+    <div class="elangs" id="eLangs">
+      <span class="elang on" data-l="en">English</span>
+      <span class="elang" data-l="ko">한국어</span>
+      <span class="elang" data-l="ja">日本語</span>
+      <span class="elang" data-l="fr">Français</span>
+      <span class="elang" data-l="zh">中文</span>
+      <span class="elang" data-l="es">Español</span>
+    </div>
+    <button id="eStart">Start</button>
+  </div>
+</div>
+<div id="loading"><div id="loadTitle">Creating the universe…</div><div id="loadMsg" style="font-size:12px;color:#5f6f95"></div></div>
 <div id="topbar" class="panel">
   <input id="q" placeholder="huggingface.co 모델 링크 또는 org/model 입력 (예: Qwen/Qwen3-8B)">
   <button id="goBtn">탐색</button>
@@ -91,51 +115,26 @@
 <div id="hint" class="panel">클릭 = 이동 · Ctrl+클릭 = HF 열기 · WASD = 유영(Shift 가속) · 전환 = 별들이 태스크⇄도메인 별자리로 재배치</div>
 <div id="info" class="panel"></div>
 <div id="filters" class="panel">
-  <h4>은하 선택</h4>
-  <select id="galaxySel"><option value="">— 은하로 이동 —</option></select>
-  <h4>내 메모리 (VRAM/RAM)</h4>
-  <select id="memSel">
-    <option value="0">제한 없음</option>
-    <option value="4">4 GB 이하 구동</option>
-    <option value="8">8 GB 이하 구동</option>
-    <option value="16">16 GB 이하 구동</option>
-    <option value="24">24 GB 이하 구동</option>
-    <option value="48">48 GB 이하 구동</option>
-  </select>
-  <h4>라이선스</h4>
-  <select id="licSel">
-    <option value="">전체</option>
-    <option value="perm">상업적 사용 무난 (Apache/MIT 등)</option>
-    <option value="noNC">비상업(NC) 라이선스 제외</option>
-  </select>
-  <h4>출시 시기</h4>
-  <select id="ageSel">
-    <option value="0">전체</option>
-    <option value="6">최근 6개월</option>
-    <option value="12">최근 1년</option>
-    <option value="24">최근 2년</option>
-  </select>
-  <h4>언어</h4>
-  <select id="langSel">
-    <option value="">전체</option>
-    <option value="ko">한국어 지원</option>
-    <option value="multi">다국어 (3개 언어 이상)</option>
-  </select>
-  <h4>포맷</h4>
-  <select id="fmtSel">
-    <option value="">전체</option>
-    <option value="gguf">GGUF — 로컬 구동 (llama.cpp/Ollama)</option>
-    <option value="onnx">ONNX — 경량 배포</option>
-    <option value="safetensors">safetensors</option>
-  </select>
-  <h4>최소 다운로드 (30일) <span id="popVal" style="float:right">전체</span></h4>
+  <h4 id="fhGalaxy"></h4>
+  <select id="galaxySel"></select>
+  <h4 id="fhMem"></h4>
+  <select id="memSel"></select>
+  <h4 id="fhLic"></h4>
+  <select id="licSel"></select>
+  <h4 id="fhAge"></h4>
+  <select id="ageSel"></select>
+  <h4 id="fhLang"></h4>
+  <select id="langSel"></select>
+  <h4 id="fhFmt"></h4>
+  <select id="fmtSel"></select>
+  <h4><span id="fhPop"></span> <span id="popVal" style="float:right"></span></h4>
   <input type="range" id="popRange" min="0" max="6" step="1" value="0" style="width:100%">
-  <h4>태그 (다중선택 AND)</h4>
+  <h4 id="fhTags"></h4>
   <div id="tagChips"></div>
-  <h4>범례</h4>
+  <h4 id="fhLegend"></h4>
   <div id="legendSec"></div>
 </div>
-<div id="related" class="panel"><h4>연관 별</h4><ol id="relList"></ol></div>
+<div id="related" class="panel"><h4 id="relTitle"></h4><ol id="relList"></ol></div>
 
 <script>
 /* ================= 설정 ================= */
@@ -166,6 +165,115 @@ const SPREAD = 1.55; // 우주 전체 스케일 — 은하 간격을 넓혀 방�
 TASKS.forEach(t=>t.center=t.center.map(v=>v*SPREAD));
 DOMAINS.forEach(d=>d.center=d.center.map(v=>v*SPREAD));
 const fr = x => x - Math.floor(x);
+
+/* ================= 다국어 (i18n) ================= */
+const I18N = {
+en:{purpose:"Explore Hugging Face's open-source AI as a living universe. Trending models shine as planets at galaxy centers, related models cluster like star systems, and one click switches the sky between Task and Domain constellations.",
+ start:"Start", searchPh:"Paste a huggingface.co model link or org/model (e.g. Qwen/Qwen3-8B)", searchBtn:"Explore",
+ toDomain:"⇄ Domain universe", toTask:"⇄ Task universe",
+ hint:"Click = travel · Ctrl+Click = open HF · WASD = fly (Shift boost) · Switch = stars re-form into task⇄domain constellations",
+ hintHot:"🔥 Starting at today's hottest star: <b>{id}</b> | Click=travel · Ctrl+Click=open HF · WASD=fly",
+ loading:"Creating the Hugging Face universe…", loadingSub:"Collecting model metadata", loadFail:"Can't reach the HF API — check your network",
+ all:"All", fhGalaxy:"Galaxy", galaxyAll:"— travel to a galaxy —", taskUni:"Task universe", domainUni:"Domain universe",
+ fhMem:"My memory (VRAM/RAM)", memOpt:"Runs in ≤ {n} GB", fhLic:"License", licPerm:"Commercial-friendly (Apache/MIT…)", licNoNC:"Exclude non-commercial (NC)",
+ fhAge:"Released", age6:"Last 6 months", age12:"Last year", age24:"Last 2 years",
+ fhLang:"Language", langKo:"Korean support", langMulti:"Multilingual (3+ languages)",
+ fhFmt:"Format", fmtGguf:"GGUF — run locally (llama.cpp/Ollama)", fmtOnnx:"ONNX — lightweight deploy",
+ fhPop:"Min downloads (30d)", fhTags:"Tags (multi-select AND)", fhLegend:"Legend",
+ legend:"<b>Planets</b> = trending top 1–5 (center & satellite cluster)<br><b>Mid stars</b> (cross flare) = top downloads/likes<br>Small stars = moons bound to a star · dust = tier-2",
+ relTitle:"Connected stars", strong:"strong link", noSummary:"(no README summary)", connectedInfo:"{n} connected stars (solid = strong link)",
+ openHF:"Open on Hugging Face ↗", alertModels:"This demo supports model links only.", alertNotFound:"Model not found: ",
+ tasks:{'text-generation':'Text Generation',translation:'Translation','sentence-similarity':'Sentence Similarity','image-to-text':'Image→Text','text-to-image':'Text→Image','image-classification':'Image Classification','automatic-speech-recognition':'Speech Recognition','text-to-speech':'Speech Synthesis'},
+ domains:{code:'Code & Dev',bio:'Medical & Bio',lawfin:'Law & Finance',sci:'Math & Science',chat:'Chat & Assistant',art:'Art & Creative',voice:'Voice & Music',embed:'Search & Embeddings',multi:'Multilingual',gen:'General'}},
+ko:{purpose:"Hugging Face의 오픈소스 AI를 살아있는 우주로 탐험하세요. 트렌딩 모델은 은하 중심의 행성으로 빛나고, 연관 모델들은 항성계처럼 군집하며, 클릭 한 번으로 태스크⇄도메인 별자리가 전환됩니다.",
+ start:"시작", searchPh:"huggingface.co 모델 링크 또는 org/model 입력 (예: Qwen/Qwen3-8B)", searchBtn:"탐색",
+ toDomain:"⇄ 도메인 우주로", toTask:"⇄ 태스크 우주로",
+ hint:"클릭 = 이동 · Ctrl+클릭 = HF 열기 · WASD = 유영(Shift 가속) · 전환 = 별들이 태스크⇄도메인 별자리로 재배치",
+ hintHot:"🔥 지금 가장 핫한 별에서 시작: <b>{id}</b> | 클릭=이동 · Ctrl+클릭=HF 열기 · WASD=유영",
+ loading:"HuggingFace 우주 생성 중…", loadingSub:"모델 메타데이터 수집", loadFail:"HF API 접속 실패 — 네트워크를 확인하세요",
+ all:"전체", fhGalaxy:"은하 선택", galaxyAll:"— 은하로 이동 —", taskUni:"태스크 우주", domainUni:"도메인 우주",
+ fhMem:"내 메모리 (VRAM/RAM)", memOpt:"{n} GB 이하 구동", fhLic:"라이선스", licPerm:"상업적 사용 무난 (Apache/MIT 등)", licNoNC:"비상업(NC) 라이선스 제외",
+ fhAge:"출시 시기", age6:"최근 6개월", age12:"최근 1년", age24:"최근 2년",
+ fhLang:"언어", langKo:"한국어 지원", langMulti:"다국어 (3개 언어 이상)",
+ fhFmt:"포맷", fmtGguf:"GGUF — 로컬 구동 (llama.cpp/Ollama)", fmtOnnx:"ONNX — 경량 배포",
+ fhPop:"최소 다운로드 (30일)", fhTags:"태그 (다중선택 AND)", fhLegend:"범례",
+ legend:"<b>행성</b> = 트렌딩 1~5위 (중심·위성은하)<br><b>중간 항성</b>(십자빛) = 다운로드·좋아요 상위<br>작은 별 = 항성 중력에 잡힌 위성 · 별먼지 = Tier2",
+ relTitle:"연관 별", strong:"강한 연관", noSummary:"(README 요약 없음)", connectedInfo:"연관 별 {n}개 연결됨 (실선=강한 연관)",
+ openHF:"HuggingFace에서 열기 ↗", alertModels:"데모는 모델 링크만 지원해요.", alertNotFound:"모델을 찾지 못했어요: ",
+ tasks:{'text-generation':'텍스트 생성',translation:'번역','sentence-similarity':'문장 유사도','image-to-text':'이미지→텍스트','text-to-image':'텍스트→이미지','image-classification':'이미지 분류','automatic-speech-recognition':'음성 인식','text-to-speech':'음성 합성'},
+ domains:{code:'코드·개발',bio:'의료·생명',lawfin:'법률·금융',sci:'수학·과학',chat:'대화·어시스턴트',art:'예술·창작',voice:'음성·음악',embed:'검색·임베딩',multi:'다국어',gen:'일반·범용'}},
+ja:{purpose:"Hugging FaceのオープンソースAIを生きた宇宙として探検。トレンドモデルは銀河中心の惑星として輝き、関連モデルは星系のように集まり、ワンクリックでタスク⇄ドメインの星座が切り替わります。",
+ start:"スタート", searchPh:"huggingface.co のモデルリンクか org/model を入力 (例: Qwen/Qwen3-8B)", searchBtn:"探索",
+ toDomain:"⇄ ドメイン宇宙へ", toTask:"⇄ タスク宇宙へ",
+ hint:"クリック=移動 · Ctrl+クリック=HFを開く · WASD=遊泳(Shift加速) · 切替=星がタスク⇄ドメイン星座へ再配置",
+ hintHot:"🔥 今最もホットな星から開始: <b>{id}</b> | クリック=移動 · Ctrl+クリック=HF · WASD=遊泳",
+ loading:"Hugging Face宇宙を生成中…", loadingSub:"モデルのメタデータを収集", loadFail:"HF APIに接続できません — ネットワークをご確認ください",
+ all:"すべて", fhGalaxy:"銀河を選択", galaxyAll:"— 銀河へ移動 —", taskUni:"タスク宇宙", domainUni:"ドメイン宇宙",
+ fhMem:"メモリ (VRAM/RAM)", memOpt:"{n} GB 以下で動作", fhLic:"ライセンス", licPerm:"商用利用可 (Apache/MITなど)", licNoNC:"非商用(NC)を除外",
+ fhAge:"リリース時期", age6:"直近6ヶ月", age12:"直近1年", age24:"直近2年",
+ fhLang:"言語", langKo:"韓国語対応", langMulti:"多言語 (3言語以上)",
+ fhFmt:"フォーマット", fmtGguf:"GGUF — ローカル実行 (llama.cpp/Ollama)", fmtOnnx:"ONNX — 軽量デプロイ",
+ fhPop:"最小ダウンロード (30日)", fhTags:"タグ (複数選択 AND)", fhLegend:"凡例",
+ legend:"<b>惑星</b> = トレンド1〜5位 (中心・衛星団)<br><b>中型恒星</b>(十字光) = DL・いいね上位<br>小さな星 = 恒星の重力に捕まった衛星 · 塵 = Tier2",
+ relTitle:"関連する星", strong:"強い関連", noSummary:"(README要約なし)", connectedInfo:"関連星 {n} 個を接続 (実線=強い関連)",
+ openHF:"Hugging Faceで開く ↗", alertModels:"このデモはモデルリンクのみ対応です。", alertNotFound:"モデルが見つかりません: ",
+ tasks:{'text-generation':'テキスト生成',translation:'翻訳','sentence-similarity':'文の類似度','image-to-text':'画像→テキスト','text-to-image':'テキスト→画像','image-classification':'画像分類','automatic-speech-recognition':'音声認識','text-to-speech':'音声合成'},
+ domains:{code:'コード・開発',bio:'医療・生命',lawfin:'法律・金融',sci:'数学・科学',chat:'対話・アシスタント',art:'アート・創作',voice:'音声・音楽',embed:'検索・埋め込み',multi:'多言語',gen:'汎用'}},
+fr:{purpose:"Explorez l'IA open source de Hugging Face comme un univers vivant. Les modèles tendance brillent en planètes au cœur des galaxies, les modèles liés se regroupent en systèmes stellaires, et un clic bascule le ciel entre constellations Tâche et Domaine.",
+ start:"Commencer", searchPh:"Collez un lien de modèle huggingface.co ou org/model (ex : Qwen/Qwen3-8B)", searchBtn:"Explorer",
+ toDomain:"⇄ Univers Domaine", toTask:"⇄ Univers Tâche",
+ hint:"Clic = voyager · Ctrl+Clic = ouvrir HF · WASD = voler (Shift accélère) · Bascule = les étoiles se réorganisent",
+ hintHot:"🔥 Départ sur l'étoile la plus en vogue : <b>{id}</b> | Clic=voyager · Ctrl+Clic=HF · WASD=voler",
+ loading:"Création de l'univers Hugging Face…", loadingSub:"Collecte des métadonnées", loadFail:"API HF inaccessible — vérifiez votre réseau",
+ all:"Tout", fhGalaxy:"Galaxie", galaxyAll:"— aller vers une galaxie —", taskUni:"Univers Tâche", domainUni:"Univers Domaine",
+ fhMem:"Ma mémoire (VRAM/RAM)", memOpt:"Fonctionne en ≤ {n} Go", fhLic:"Licence", licPerm:"Usage commercial OK (Apache/MIT…)", licNoNC:"Exclure non-commercial (NC)",
+ fhAge:"Sortie", age6:"6 derniers mois", age12:"Dernière année", age24:"2 dernières années",
+ fhLang:"Langue", langKo:"Support coréen", langMulti:"Multilingue (3+ langues)",
+ fhFmt:"Format", fmtGguf:"GGUF — exécution locale (llama.cpp/Ollama)", fmtOnnx:"ONNX — déploiement léger",
+ fhPop:"Téléchargements min (30j)", fhTags:"Tags (multi-sélection ET)", fhLegend:"Légende",
+ legend:"<b>Planètes</b> = top 1–5 tendance (centre & amas satellite)<br><b>Étoiles moyennes</b> (croix) = top téléchargements/likes<br>Petites étoiles = lunes liées à une étoile · poussière = tier 2",
+ relTitle:"Étoiles connectées", strong:"lien fort", noSummary:"(pas de résumé README)", connectedInfo:"{n} étoiles connectées (trait plein = lien fort)",
+ openHF:"Ouvrir sur Hugging Face ↗", alertModels:"Cette démo ne prend en charge que les liens de modèles.", alertNotFound:"Modèle introuvable : ",
+ tasks:{'text-generation':'Génération de texte',translation:'Traduction','sentence-similarity':'Similarité de phrases','image-to-text':'Image→Texte','text-to-image':'Texte→Image','image-classification':"Classification d'images",'automatic-speech-recognition':'Reconnaissance vocale','text-to-speech':'Synthèse vocale'},
+ domains:{code:'Code & Dév',bio:'Médical & Bio',lawfin:'Droit & Finance',sci:'Maths & Science',chat:'Chat & Assistant',art:'Art & Création',voice:'Voix & Musique',embed:'Recherche & Embeddings',multi:'Multilingue',gen:'Général'}},
+zh:{purpose:"把 Hugging Face 的开源 AI 当作一个活的宇宙来探索。热门模型如行星般在星系中心闪耀，相关模型像恒星系一样聚集，一键即可在任务⇄领域星座之间切换。",
+ start:"开始", searchPh:"粘贴 huggingface.co 模型链接或 org/model (例: Qwen/Qwen3-8B)", searchBtn:"探索",
+ toDomain:"⇄ 领域宇宙", toTask:"⇄ 任务宇宙",
+ hint:"点击=前往 · Ctrl+点击=打开HF · WASD=遨游(Shift加速) · 切换=星星重组为任务⇄领域星座",
+ hintHot:"🔥 从当下最热的星开始: <b>{id}</b> | 点击=前往 · Ctrl+点击=HF · WASD=遨游",
+ loading:"正在生成 Hugging Face 宇宙…", loadingSub:"收集模型元数据", loadFail:"无法连接 HF API — 请检查网络",
+ all:"全部", fhGalaxy:"选择星系", galaxyAll:"— 前往星系 —", taskUni:"任务宇宙", domainUni:"领域宇宙",
+ fhMem:"我的内存 (VRAM/RAM)", memOpt:"≤ {n} GB 可运行", fhLic:"许可证", licPerm:"可商用 (Apache/MIT等)", licNoNC:"排除非商用(NC)",
+ fhAge:"发布时间", age6:"近6个月", age12:"近1年", age24:"近2年",
+ fhLang:"语言", langKo:"支持韩语", langMulti:"多语言 (3种以上)",
+ fhFmt:"格式", fmtGguf:"GGUF — 本地运行 (llama.cpp/Ollama)", fmtOnnx:"ONNX — 轻量部署",
+ fhPop:"最低下载量 (30天)", fhTags:"标签 (多选 AND)", fhLegend:"图例",
+ legend:"<b>行星</b> = 热门前1–5 (中心·卫星团)<br><b>中型恒星</b>(十字光) = 下载/点赞靠前<br>小星 = 被恒星引力束缚的卫星 · 尘埃 = Tier2",
+ relTitle:"关联的星", strong:"强关联", noSummary:"(无README摘要)", connectedInfo:"已连接 {n} 颗关联星 (实线=强关联)",
+ openHF:"在 Hugging Face 打开 ↗", alertModels:"演示仅支持模型链接。", alertNotFound:"未找到模型: ",
+ tasks:{'text-generation':'文本生成',translation:'翻译','sentence-similarity':'句子相似度','image-to-text':'图像→文本','text-to-image':'文本→图像','image-classification':'图像分类','automatic-speech-recognition':'语音识别','text-to-speech':'语音合成'},
+ domains:{code:'代码·开发',bio:'医疗·生命',lawfin:'法律·金融',sci:'数学·科学',chat:'对话·助手',art:'艺术·创作',voice:'语音·音乐',embed:'检索·嵌入',multi:'多语言',gen:'通用'}},
+es:{purpose:"Explora la IA de código abierto de Hugging Face como un universo vivo. Los modelos en tendencia brillan como planetas en el centro de las galaxias, los modelos relacionados se agrupan como sistemas estelares, y un clic alterna el cielo entre constelaciones de Tarea y Dominio.",
+ start:"Comenzar", searchPh:"Pega un enlace de modelo de huggingface.co u org/model (ej: Qwen/Qwen3-8B)", searchBtn:"Explorar",
+ toDomain:"⇄ Universo Dominio", toTask:"⇄ Universo Tarea",
+ hint:"Clic = viajar · Ctrl+Clic = abrir HF · WASD = volar (Shift acelera) · Cambio = las estrellas se reorganizan",
+ hintHot:"🔥 Empezando en la estrella más popular: <b>{id}</b> | Clic=viajar · Ctrl+Clic=HF · WASD=volar",
+ loading:"Creando el universo Hugging Face…", loadingSub:"Recopilando metadatos", loadFail:"No se puede acceder a la API de HF — revisa tu red",
+ all:"Todo", fhGalaxy:"Galaxia", galaxyAll:"— viajar a una galaxia —", taskUni:"Universo Tarea", domainUni:"Universo Dominio",
+ fhMem:"Mi memoria (VRAM/RAM)", memOpt:"Funciona con ≤ {n} GB", fhLic:"Licencia", licPerm:"Uso comercial OK (Apache/MIT…)", licNoNC:"Excluir no comercial (NC)",
+ fhAge:"Lanzamiento", age6:"Últimos 6 meses", age12:"Último año", age24:"Últimos 2 años",
+ fhLang:"Idioma", langKo:"Soporte coreano", langMulti:"Multilingüe (3+ idiomas)",
+ fhFmt:"Formato", fmtGguf:"GGUF — ejecución local (llama.cpp/Ollama)", fmtOnnx:"ONNX — despliegue ligero",
+ fhPop:"Descargas mín (30d)", fhTags:"Etiquetas (multiselección AND)", fhLegend:"Leyenda",
+ legend:"<b>Planetas</b> = top 1–5 en tendencia (centro y cúmulo satélite)<br><b>Estrellas medias</b> (destello) = top descargas/likes<br>Estrellas pequeñas = lunas ligadas a una estrella · polvo = tier 2",
+ relTitle:"Estrellas conectadas", strong:"vínculo fuerte", noSummary:"(sin resumen README)", connectedInfo:"{n} estrellas conectadas (línea sólida = vínculo fuerte)",
+ openHF:"Abrir en Hugging Face ↗", alertModels:"La demo solo admite enlaces de modelos.", alertNotFound:"Modelo no encontrado: ",
+ tasks:{'text-generation':'Generación de texto',translation:'Traducción','sentence-similarity':'Similitud de frases','image-to-text':'Imagen→Texto','text-to-image':'Texto→Imagen','image-classification':'Clasificación de imágenes','automatic-speech-recognition':'Reconocimiento de voz','text-to-speech':'Síntesis de voz'},
+ domains:{code:'Código y Dev',bio:'Médico y Bio',lawfin:'Legal y Finanzas',sci:'Mates y Ciencia',chat:'Chat y Asistente',art:'Arte y Creación',voice:'Voz y Música',embed:'Búsqueda y Embeddings',multi:'Multilingüe',gen:'General'}}
+};
+let LANG='en', T=I18N.en, hotId=null;
+const gNameA = i => T.tasks[TASKS[i].tag];
+const gNameB = i => T.domains[DOMAINS[i].key];
 
 /* ================= 도메인 추론 ================= */
 function inferDomain(m){
@@ -490,7 +598,7 @@ let uT = 0, transFrom = 0, transStart = -1;
 function switchMode(){
   transFrom = uT; transStart = performance.now();
   mode = 1-mode;
-  document.getElementById('modeBtn').textContent = mode? '⇄ 태스크 우주로':'⇄ 도메인 우주로';
+  document.getElementById('modeBtn').textContent = mode? T.toTask : T.toDomain;
   galaxyLabels.forEach(l=>{ l.el.style.opacity = (l.uni===mode)? .38 : 0; });
 }
 function ease01(x){ return x<0?0:x>1?1:x*x*(3-2*x); }
@@ -604,8 +712,8 @@ let starLabels=[], galaxyLabels=[], pLabels=[], selectionIds=new Set();
 function addDiv(cls, html){ const e=document.createElement('div'); e.className=cls; e.innerHTML=html; document.body.appendChild(e); return e; }
 function fmtK(n){ return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'k':''+n; }
 function makeLabels(){
-  TASKS.forEach((t,i)=>galaxyLabels.push({uni:0, gi:i, pos:new THREE.Vector3(...t.center), el:addDiv('glbl',t.name)}));
-  DOMAINS.forEach((d,i)=>galaxyLabels.push({uni:1, gi:i, pos:new THREE.Vector3(...d.center), el:addDiv('glbl',d.name)}));
+  TASKS.forEach((t,i)=>galaxyLabels.push({uni:0, gi:i, pos:new THREE.Vector3(...t.center), el:addDiv('glbl',gNameA(i))}));
+  DOMAINS.forEach((d,i)=>galaxyLabels.push({uni:1, gi:i, pos:new THREE.Vector3(...d.center), el:addDiv('glbl',gNameB(i))}));
   galaxyLabels.forEach(l=>{ l.el.style.opacity = l.uni===0? .38:0; });
 }
 function galaxyLabelHidden(l){
@@ -652,8 +760,8 @@ function setHover(m){
   canvas.style.cursor = m? 'pointer':'default';
   if(!m){ hoverEl.style.display='none'; return; }
   hoverEl.style.display='block';
-  hoverEl.innerHTML = `<b>${m.id}</b><br><span class="dim">♥ ${m.likes.toLocaleString()} · ⬇ ${m.dl.toLocaleString()} · ${TASKS[m.gA].name}</span><div class="sum">…</div>`;
-  fetchSummary(m).then(s=>{ if(hoverStar===m) hoverEl.querySelector('.sum').textContent = s || '(README 요약 없음)'; });
+  hoverEl.innerHTML = `<b>${m.id}</b><br><span class="dim">♥ ${m.likes.toLocaleString()} · ⬇ ${m.dl.toLocaleString()} · ${gNameA(m.gA)}</span><div class="sum">…</div>`;
+  fetchSummary(m).then(s=>{ if(hoverStar===m) hoverEl.querySelector('.sum').textContent = s || T.noSummary; });
 }
 function projectLabels(){
   const w=innerWidth, h=innerHeight, tmp=new THREE.Vector3();
@@ -777,8 +885,8 @@ async function startAtTrending(){
       scene.remove(starPoints); starPoints = buildPoints(STARS,1);
     }
     select(m); syncStarLabels();
-    const hint=document.getElementById('hint');
-    hint.innerHTML = `🔥 지금 가장 핫한 별에서 시작: <b>${m.id}</b> | 클릭=이동 · Ctrl+클릭=HF 열기 · WASD=유영`;
+    hotId = m.id;
+    document.getElementById('hint').innerHTML = T.hintHot.replace('{id}', m.id);
   }catch(e){ /* 트렌딩 실패 시 그냥 전체 뷰에서 시작 */ }
 }
 
@@ -787,7 +895,7 @@ async function search(){
   let q=document.getElementById('q').value.trim();
   if(!q) return;
   q=q.replace(/^https?:\/\/(www\.)?huggingface\.co\//,'').split('?')[0].replace(/\/(tree|blob)\/.*$/,'').replace(/\/$/,'');
-  if(/^(datasets|spaces)\//.test(q)){ alert('데모는 모델 링크만 지원해요.'); return; }
+  if(/^(datasets|spaces)\//.test(q)){ alert(T.alertModels); return; }
   let m = STARS.find(x=>x.id.toLowerCase()===q.toLowerCase())
        || STARS.find(x=>x.id.toLowerCase().includes(q.toLowerCase()));
   if(!m){ // 미수집 모델 → 실시간 조회 후 즉석 배치
@@ -795,7 +903,7 @@ async function search(){
       const raw = await (await fetch('https://huggingface.co/api/models/'+q)).json();
       if(!raw.id) throw 0;
       m = placeExternal(parseModel(raw));
-    }catch(e){ alert('모델을 찾지 못했어요: '+q); return; }
+    }catch(e){ alert(T.alertNotFound+q); return; }
   }
   select(m); syncStarLabels();
 }
@@ -808,10 +916,10 @@ function renderInfo(m){
   const el=document.getElementById('info');
   el.style.display='block';
   el.innerHTML = `<h3>${m.id}</h3>
-   <div class="dim">${TASKS[m.gA].name} 은하 · ${DOMAINS[m.gB].name} (도메인 우주) · ${m.created||'?'}년</div>
-   <div>다운로드 <b>${m.dl.toLocaleString()}</b> · ♥ ${m.likes.toLocaleString()}</div>
-   <div class="dim">연관 별 ${related.length}개 연결됨 (실선=강한 연관)</div>
-   <a href="https://huggingface.co/${m.id}" target="_blank">HuggingFace에서 열기 ↗</a>`;
+   <div class="dim">${gNameA(m.gA)} · ${gNameB(m.gB)} · ${m.created||'?'}</div>
+   <div>⬇ <b>${m.dl.toLocaleString()}</b> · ♥ ${m.likes.toLocaleString()}</div>
+   <div class="dim">${T.connectedInfo.replace('{n}', related.length)}</div>
+   <a href="https://huggingface.co/${m.id}" target="_blank">${T.openHF}</a>`;
 }
 document.getElementById('legendSec').innerHTML =
   `<b>행성</b> = 트렌딩 1~5위 (중심·위성은하)<br><b>중간 항성</b>(십자빛) = 다운로드·좋아요 상위<br>작은 별 = 항성 중력에 잡힌 위성 · 별먼지 = Tier2`;
@@ -902,13 +1010,18 @@ function buildTagChips(){ // 태그 칩: 현재 은하 범위의 정보성 태�
     box.appendChild(el);
   });
 }
+function fillGalaxySelect(){
+  const gs = document.getElementById('galaxySel'), cur = gs.value;
+  gs.innerHTML = `<option value="">${T.galaxyAll}</option>`;
+  const og1 = document.createElement('optgroup'); og1.label=T.taskUni;
+  TASKS.forEach((t,i)=>{ const o=document.createElement('option'); o.value='A'+i; o.textContent=gNameA(i); og1.appendChild(o); });
+  const og2 = document.createElement('optgroup'); og2.label=T.domainUni;
+  DOMAINS.forEach((d,i)=>{ const o=document.createElement('option'); o.value='B'+i; o.textContent=gNameB(i); og2.appendChild(o); });
+  gs.appendChild(og1); gs.appendChild(og2); gs.value=cur;
+}
 function buildFilters(){
   const gs = document.getElementById('galaxySel');
-  const og1 = document.createElement('optgroup'); og1.label='태스크 우주';
-  TASKS.forEach((t,i)=>{ const o=document.createElement('option'); o.value='A'+i; o.textContent=t.name; og1.appendChild(o); });
-  const og2 = document.createElement('optgroup'); og2.label='도메인 우주';
-  DOMAINS.forEach((d,i)=>{ const o=document.createElement('option'); o.value='B'+i; o.textContent=d.name; og2.appendChild(o); });
-  gs.appendChild(og1); gs.appendChild(og2);
+  fillGalaxySelect();
   gs.onchange = ()=>{ // 은하 선택 = 필터: 그 은하 별만 남기고, 트렌딩 1위 중심으로 재중심 + 태그 재계산
     const v = gs.value;
     if(!v){ activeGalaxy=null; activeTags.clear(); applyFilters(); buildTagChips(); return; }
@@ -924,11 +1037,61 @@ function buildFilters(){
   const pr = document.getElementById('popRange');
   pr.oninput = ()=>{
     const v = +pr.value;
-    document.getElementById('popVal').textContent = v? '⬇ '+fmtK(Math.pow(10,v))+'+' : '전체';
+    document.getElementById('popVal').textContent = v? '⬇ '+fmtK(Math.pow(10,v))+'+' : T.all;
     applyFilters();
   };
   buildTagChips();
 }
+
+/* ================= 언어 적용 ================= */
+function setOpts(id, pairs){ // [value,label][]
+  const el = document.getElementById(id), cur = el.value;
+  el.innerHTML = pairs.map(p=>`<option value="${p[0]}">${p[1]}</option>`).join('');
+  el.value = cur;
+}
+function applyLang(l){
+  LANG = l; T = I18N[l] || I18N.en;
+  try{ localStorage.setItem('sbLang', l); }catch(e){}
+  document.documentElement.lang = l;
+  document.getElementById('ePurpose').textContent = T.purpose;
+  document.getElementById('eStart').textContent = T.start;
+  document.getElementById('loadTitle').textContent = T.loading;
+  const lm = document.getElementById('loadMsg'); if(lm) lm.textContent = T.loadingSub;
+  document.getElementById('q').placeholder = T.searchPh;
+  document.getElementById('goBtn').textContent = T.searchBtn;
+  document.getElementById('modeBtn').textContent = mode? T.toTask : T.toDomain;
+  document.getElementById('hint').innerHTML = hotId? T.hintHot.replace('{id}', hotId) : T.hint;
+  ['fhGalaxy','fhMem','fhLic','fhAge','fhLang','fhFmt','fhPop','fhTags','fhLegend'].forEach(k=>{
+    document.getElementById(k).textContent = T[k];
+  });
+  setOpts('memSel', [['0',T.all]].concat([4,8,16,24,48].map(n=>[''+n, T.memOpt.replace('{n}',n)])));
+  setOpts('licSel', [['',T.all],['perm',T.licPerm],['noNC',T.licNoNC]]);
+  setOpts('ageSel', [['0',T.all],['6',T.age6],['12',T.age12],['24',T.age24]]);
+  setOpts('langSel',[['',T.all],['ko',T.langKo],['multi',T.langMulti]]);
+  setOpts('fmtSel', [['',T.all],['gguf',T.fmtGguf],['onnx',T.fmtOnnx],['safetensors','safetensors']]);
+  const pv = document.getElementById('popVal'), prv = +document.getElementById('popRange').value;
+  pv.textContent = prv? '⬇ '+fmtK(Math.pow(10,prv))+'+' : T.all;
+  document.getElementById('legendSec').innerHTML = T.legend;
+  document.getElementById('relTitle').textContent = T.relTitle;
+  fillGalaxySelect();
+  galaxyLabels.forEach(gl=>{ gl.el.textContent = gl.uni? gNameB(gl.gi) : gNameA(gl.gi); });
+  if(selected){ renderInfo(selected); renderRelated(); }
+}
+/* 입장 페이지 */
+document.querySelectorAll('.elang').forEach(el=>{
+  el.onclick = ()=>{
+    document.querySelectorAll('.elang').forEach(x=>x.classList.remove('on'));
+    el.classList.add('on');
+    applyLang(el.dataset.l);
+  };
+});
+document.getElementById('eStart').onclick = ()=>{ document.getElementById('entry').style.display='none'; };
+(function initLang(){
+  let l='en'; try{ l = localStorage.getItem('sbLang') || 'en'; }catch(e){}
+  if(!I18N[l]) l='en';
+  document.querySelectorAll('.elang').forEach(x=>x.classList.toggle('on', x.dataset.l===l));
+  applyLang(l);
+})();
 
 /* ================= 연관 별 리스트 패널 ================= */
 function renderRelated(){
@@ -937,13 +1100,13 @@ function renderRelated(){
   panel.style.display='block';
   ol.innerHTML = related.map((r,i)=>
     `<li data-i="${i}"><div class="rname">${i+1}. ${r.m.id}</div>
-     <div class="rmeta">♥ ${fmtK(r.m.likes)} · ⬇ ${fmtK(r.m.dl)} · ${TASKS[r.m.gA].name}${r.s>=6?' · 강한 연관':''}</div>
+     <div class="rmeta">♥ ${fmtK(r.m.likes)} · ⬇ ${fmtK(r.m.dl)} · ${gNameA(r.m.gA)}${r.s>=6?' · '+T.strong:''}</div>
      <div class="rsum" id="rsum${i}">…</div></li>`).join('');
   ol.querySelectorAll('li').forEach(li=>{
     li.onclick = ()=>{ const r=related[+li.dataset.i]; select(r.m); syncStarLabels(); };
   });
   related.forEach((r,i)=>fetchSummary(r.m).then(s=>{
-    const el=document.getElementById('rsum'+i); if(el) el.textContent = s || '(README 요약 없음)';
+    const el=document.getElementById('rsum'+i); if(el) el.textContent = s || T.noSummary;
   }));
 }
 
@@ -986,7 +1149,7 @@ addEventListener('resize',resize);
 /* ================= 시작 ================= */
 (async ()=>{
   try{ await loadData(); }
-  catch(e){ document.getElementById('loadMsg').textContent='HF API 접속 실패 — 네트워크를 확인하세요'; return; }
+  catch(e){ document.getElementById('loadMsg').textContent=T.loadFail; return; }
   document.getElementById('loading').remove();
   renderer.setClearColor(BG_DARK);
   buildNebula();
