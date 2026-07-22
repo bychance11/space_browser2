@@ -64,8 +64,8 @@
   #loading{position:fixed; inset:0; display:flex; flex-direction:column; gap:12px; align-items:center; justify-content:center; z-index:20; color:#9fb3dd; font-size:14px; background:#04060f}
   .lbl{position:fixed; transform:translate(-50%,-130%); font-size:11px; pointer-events:none; white-space:nowrap; color:var(--fg); text-shadow:0 0 6px rgba(0,0,0,.5); z-index:5}
   body.light .lbl{text-shadow:0 0 6px rgba(255,255,255,.7)}
-  .glbl{position:fixed; transform:translate(-50%,-50%); font-size:12px; font-weight:600; letter-spacing:.35em; pointer-events:none; white-space:nowrap; color:var(--fg-dim); opacity:.7; z-index:4; transition:opacity 2.5s; text-transform:uppercase}
-  .glbl::after{content:''; display:block; margin:4px auto 0; width:60%; height:1px; background:linear-gradient(90deg,transparent,var(--fg-dim),transparent); opacity:.4}
+  .glbl{position:fixed; transform:translate(-50%,-50%); font-size:60px; font-weight:800; letter-spacing:.22em; pointer-events:none; white-space:nowrap; color:var(--fg-dim); opacity:.38; z-index:1; transition:opacity 2.5s; text-transform:uppercase}
+  .glbl::after{content:''; display:block; margin:6px auto 0; width:55%; height:2px; background:linear-gradient(90deg,transparent,var(--fg-dim),transparent); opacity:.35}
   .lbl.sel{font-weight:700; font-size:12.5px; color:var(--accent)}
   .plbl{position:fixed; transform:translate(-50%,-140%); pointer-events:none; white-space:nowrap; z-index:5; color:var(--fg); text-shadow:0 0 6px rgba(0,0,0,.55)}
   body.light .plbl{text-shadow:0 0 6px rgba(255,255,255,.75)}
@@ -461,7 +461,7 @@ function switchMode(){
   transFrom = uT; transStart = performance.now();
   mode = 1-mode;
   document.getElementById('modeBtn').textContent = mode? '⇄ 태스크 우주로':'⇄ 도메인 우주로';
-  galaxyLabels.forEach(l=>{ l.el.style.opacity = (l.uni===mode)? .75 : 0; });
+  galaxyLabels.forEach(l=>{ l.el.style.opacity = (l.uni===mode)? .38 : 0; });
 }
 function ease01(x){ return x<0?0:x>1?1:x*x*(3-2*x); }
 function starPos(m, t, out){ // 셰이더와 동일한 경로를 CPU에서 재현 (라벨·연결선·피킹용)
@@ -576,7 +576,7 @@ function fmtK(n){ return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)
 function makeLabels(){
   TASKS.forEach((t,i)=>galaxyLabels.push({uni:0, gi:i, pos:new THREE.Vector3(...t.center), el:addDiv('glbl',t.name)}));
   DOMAINS.forEach((d,i)=>galaxyLabels.push({uni:1, gi:i, pos:new THREE.Vector3(...d.center), el:addDiv('glbl',d.name)}));
-  galaxyLabels.forEach(l=>{ l.el.style.opacity = l.uni===0? .75:0; });
+  galaxyLabels.forEach(l=>{ l.el.style.opacity = l.uni===0? .38:0; });
 }
 function galaxyLabelHidden(l){
   if(!activeGalaxy) return false;
