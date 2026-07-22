@@ -73,6 +73,8 @@
   .p0{font-size:16.5px; font-weight:800; letter-spacing:.02em}
   .p1{font-size:12px; font-weight:600; opacity:.78}
   .p2{font-size:10px; opacity:.38}
+  body.light .p1{opacity:.9}
+  body.light .p2{opacity:.6}
   .hoverbox{position:fixed; transform:translate(-50%,-135%); z-index:12; pointer-events:none; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:8px 11px; font-size:12.5px; line-height:1.5; max-width:340px; white-space:normal; backdrop-filter:blur(8px)}
   .hoverbox .dim,.hoverbox .sum{color:var(--fg-dim)}
   .hoverbox .sum{font-size:11.5px; margin-top:3px}
@@ -297,7 +299,7 @@ void main(){
   gl_Position = projectionMatrix*mv;
 }`;
 const FSH = `
-uniform float uAlpha; varying vec3 vColor; varying float vSeed; varying float vSize; varying float vPlanet; varying float vHeat; varying float vVis;
+uniform float uAlpha; uniform float uLight; varying vec3 vColor; varying float vSeed; varying float vSize; varying float vPlanet; varying float vHeat; varying float vVis;
 void main(){
   vec2 uv = gl_PointCoord - 0.5;
   float d = length(uv);
@@ -316,22 +318,26 @@ void main(){
     float w    = mix(70.0, 17.0, vHeat) * jit;                    // 핫할수록 넓고 부드러운 대기
     float rim  = exp(-abs(d-R)*w);
     float rimB = mix(0.35, 1.0, vHeat) * jit;                     // 핫할수록 밝게
-    vec3 rimCol = (vColor*mix(0.8,1.6,vHeat) + vec3(mix(0.12,0.6,vHeat))) * rim * rimB;
+    // 백우주에선 흰 림 대신 진한 잉크 림 (종이 위 가독성)
+    vec3 rimTint = mix(vec3(mix(0.12,0.6,vHeat)), vColor*0.4, uLight);
+    vec3 rimCol = (vColor*mix(0.8,1.6,vHeat) + rimTint) * rim * rimB * mix(1.0, 0.75, uLight);
     float halo = exp(-(d-R)*mix(15.0,6.0,vHeat)) * step(R, d) * mix(0.03,0.3,vHeat);
     col = bodyCol*body + rimCol + vColor*halo;
     a = max(body, rim*rimB*0.9 + halo) * uAlpha;
   } else {
     // ===== 일반 별 (중간 항성은 회절 스파이크) =====
     float core = exp(-d*d*36.0);
-    float glow = exp(-d*4.2)*0.5;
+    float glow = exp(-d*4.2)*mix(0.5, 0.3, uLight);
     float spikes = 0.0;
     if(vSize > 6.5){
       float s1 = exp(-abs(uv.x)*26.0)*exp(-abs(uv.y)*5.0);
       float s2 = exp(-abs(uv.y)*26.0)*exp(-abs(uv.x)*5.0);
       spikes = (s1+s2)*smoothstep(0.5,0.05,d)*0.7;
     }
-    a = clamp(core+glow+spikes, 0.0, 1.0)*uAlpha;
-    col = vColor*(0.8+core*1.1) + vec3(1.0)*core*0.4;
+    a = clamp(core*mix(1.0,1.5,uLight)+glow+spikes, 0.0, 1.0)*uAlpha;
+    vec3 colDark  = vColor*(0.8+core*1.1) + vec3(1.0)*core*0.4;  // 흑우주: 흰 핵
+    vec3 colLight = vColor*(0.85-core*0.35);                     // 백우주: 중심이 더 진한 잉크 점
+    col = mix(colDark, colLight, uLight);
   }
   a *= smoothstep(0.5, 0.42, d); // 스프라이트 사각 경계에서 완전 소멸 → 네모 박스 제거
   a *= vVis; // 필터로 숨김
@@ -341,7 +347,7 @@ void main(){
 const materials = [];
 function makeMat(alpha){
   const m = new THREE.ShaderMaterial({
-    uniforms:{uT:{value:0}, uTime:{value:0}, uPix:{value:renderer.getPixelRatio()}, uAlpha:{value:alpha}},
+    uniforms:{uT:{value:0}, uTime:{value:0}, uPix:{value:renderer.getPixelRatio()}, uAlpha:{value:alpha}, uLight:{value:0}},
     vertexShader:VSH, fragmentShader:FSH, transparent:true, depthWrite:false,
   });
   materials.push(m); return m;
@@ -549,10 +555,12 @@ function updateLines(){
     const arr=line.geometry.attributes.position.array;
     list.forEach((r,i)=>{ starPos(r.m,uT,_v); arr.set([sp.x,sp.y,sp.z,_v.x,_v.y,_v.z],i*6); });
     line.geometry.attributes.position.needsUpdate=true;
-    line.material.color.set(mode?0x6b5433:0x9db8ee);
+    line.material.color.set(mode?0x5a4426:0x9db8ee);
   };
   fill(lineStrong, related.filter(r=>r.s>=6));
   fill(lineWeak,   related.filter(r=>r.s<6));
+  if(lineStrong) lineStrong.material.opacity = mode? .95 : .85; // 종이 위에선 선을 더 진하게
+  if(lineWeak)   lineWeak.material.opacity   = mode? .5  : .28;
   ensureHoverLine();
   if(hoverLineIdx>=0 && related[hoverLineIdx]){
     hoverLine.visible = true;
@@ -810,20 +818,38 @@ function estGB(m){ // 대략적 필요 메모리: fp16 2바이트/파라미터, 
 }
 function applyFilters(){
   const memV = +document.getElementById('memSel').value;
+  // 선택 은하와 "연관된" 외부 별 판정용 집합 (계보·저자·데이터셋·논문 공유)
+  let gFam=null, gAuth=null, gDs=null, gAx=null;
+  if(activeGalaxy){
+    gFam=new Set(); gAuth=new Set(); gDs=new Set(); gAx=new Set();
+    STARS.filter(inGalaxy).forEach(m=>{
+      gFam.add(m.family); gFam.add(m.id); gAuth.add(m.author);
+      m.datasets.forEach(x=>gDs.add(x)); m.arxivs.forEach(x=>gAx.add(x));
+    });
+  }
+  const relatedToGalaxy = m=>{
+    if(gFam.has(m.family) || gFam.has(m.id) || gAuth.has(m.author)) return true;
+    for(const x of m.datasets) if(gDs.has(x)) return true;
+    for(const x of m.arxivs) if(gAx.has(x)) return true;
+    return false;
+  };
   STARS.forEach(m=>{
     const g = estGB(m);
     const passMem = !memV || g===null || g<=memV;
     let passTag = true; activeTags.forEach(t=>{ if(!m.info.has(t)) passTag=false; });
-    m.visible = inGalaxy(m) && passMem && passTag;
+    let galA = 1;                                  // 은하 소속 = 1
+    if(activeGalaxy && !inGalaxy(m)) galA = relatedToGalaxy(m)? .45 : 0; // 연관 외부 별 = 반투명, 무관 = 숨김
+    m.visAlpha = (passMem && passTag)? galA : 0;
+    m.visible = m.visAlpha > 0;
   });
   if(starPoints){
     const arr = starPoints.geometry.attributes.vis.array;
-    STARS.forEach((m,i)=>arr[i]=m.visible?1:0);
+    STARS.forEach((m,i)=>arr[i]=m.visAlpha);
     starPoints.geometry.attributes.vis.needsUpdate = true;
   }
-  if(dustPoints){ // 별먼지도 소속 별을 따라 숨김
+  if(dustPoints){ // 별먼지도 소속 별을 따라 숨김/반투명
     const arr = dustPoints.geometry.attributes.vis.array;
-    DUST.forEach((d,i)=>arr[i]=d.src.visible?1:0);
+    DUST.forEach((d,i)=>arr[i]=d.src.visAlpha!==undefined? d.src.visAlpha : 1);
     dustPoints.geometry.attributes.vis.needsUpdate = true;
   }
   glowFA = TASKS.map((t,i)=> !activeGalaxy? 1 : (activeGalaxy.uni==='A'&&activeGalaxy.gi===i? 1 : .06));
@@ -898,14 +924,14 @@ function animate(now){
     sph.r=camAnim.r0+(camAnim.r1-camAnim.r0)*k;
     applyCam(); if(k>=1) camAnim=null;
   }
-  materials.forEach(m=>{ m.uniforms.uT.value=uT; m.uniforms.uTime.value=now*.001; });
+  materials.forEach(m=>{ m.uniforms.uT.value=uT; m.uniforms.uTime.value=now*.001; m.uniforms.uLight.value=ease01(uT); });
   if(nebulaMat){
     nebulaMat.uniforms.uT.value=uT; nebulaMat.uniforms.uTime.value=now*.001;
     nebulaMesh.position.copy(camera.position); // 유영해도 배경이 따라옴
   }
   const tE = ease01(uT);
   glowsA.forEach((s,i)=>s.material.opacity=.14*(1-tE)*glowFA[i]);
-  glowsB.forEach((s,i)=>s.material.opacity=.16*tE*glowFB[i]);
+  glowsB.forEach((s,i)=>s.material.opacity=.11*tE*glowFB[i]); // 종이 워시는 옅게 (텍스트 가독성)
   updateLines(); projectLabels();
   if(composer){
     if(bloomPass) bloomPass.strength = 1.1*(1-ease01(uT)); // 백우주(종이)에선 블룸 끔
