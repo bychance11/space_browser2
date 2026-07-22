@@ -245,7 +245,7 @@ void main(){
     float core = exp(-d*d*36.0);
     float glow = exp(-d*4.2)*0.5;
     float spikes = 0.0;
-    if(vSize > 7.0){
+    if(vSize > 6.5){
       float s1 = exp(-abs(uv.x)*26.0)*exp(-abs(uv.y)*5.0);
       float s2 = exp(-abs(uv.y)*26.0)*exp(-abs(uv.x)*5.0);
       spikes = (s1+s2)*smoothstep(0.5,0.05,d)*0.7;
