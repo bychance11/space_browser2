@@ -14,6 +14,7 @@
 | [05-roadmap.md](05-roadmap.md) | 단계별 계획 |
 | [06-star-encodings.md](06-star-encodings.md) | 별 표현/구분 방법(천문학+디자인 인코딩) — 이슈 초안 |
 | [07-architecture-academic.md](07-architecture-academic.md) | 학술 우주(OpenAlex) 아키텍처: 수집→DB→분류→필터→프론트 |
+| [08-huggingface-feasibility.md](08-huggingface-feasibility.md) | HuggingFace 우주 초기 타당성 검토 (API 검증·필드 매핑·갭) |
 
 ## 작업 방식 메모
 - 노트: 이 `docs/` 마크다운 (저장소 안, 버전관리)

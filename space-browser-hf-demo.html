@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Space Browser — HuggingFace 우주 (흑/백 전환 데모)</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root{
+    --fg:#dfe6f5; --fg-dim:#8d98b5; --panel:rgba(10,14,28,.72); --line:rgba(140,160,220,.25); --accent:#7fb4ff;
+  }
+  body.light{
+    --fg:#2b2620; --fg-dim:#8a8070; --panel:rgba(250,247,240,.78); --line:rgba(90,75,50,.25); --accent:#b0641e;
+  }
+  *{box-sizing:border-box; margin:0}
+  html,body{height:100%; overflow:hidden; background:#04060f}
+  body{font-family:'Segoe UI','Apple SD Gothic Neo',sans-serif; color:var(--fg)}
+  body, .panel, input, button{transition:color 5s, background-color 5s, border-color 5s}
+  #c{position:fixed; inset:0; display:block}
+  .panel{position:fixed; background:var(--panel); border:1px solid var(--line); border-radius:10px; backdrop-filter:blur(8px); padding:10px 14px}
+  #topbar{top:14px; left:50%; transform:translateX(-50%); display:flex; gap:8px; align-items:center; z-index:10}
+  #topbar input{width:min(420px,52vw); background:transparent; border:1px solid var(--line); border-radius:6px; color:var(--fg); padding:7px 10px; font-size:13px; outline:none}
+  #topbar input::placeholder{color:var(--fg-dim)}
+  button{background:transparent; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:7px 12px; font-size:13px; cursor:pointer}
+  button:hover{border-color:var(--accent); color:var(--accent)}
+  #modeBtn{font-weight:700; min-width:120px}
+  #info{left:14px; bottom:14px; max-width:320px; font-size:12.5px; line-height:1.55; display:none; z-index:10}
+  #info h3{font-size:14px; margin-bottom:4px; word-break:break-all}
+  #info a{color:var(--accent)}
+  #info .dim{color:var(--fg-dim)}
+  #legend{right:14px; bottom:14px; font-size:11.5px; line-height:1.7; color:var(--fg-dim); z-index:10}
+  #legend b{color:var(--fg)}
+  #hint{top:64px; left:50%; transform:translateX(-50%); font-size:11.5px; color:var(--fg-dim); z-index:9; padding:5px 12px}
+  #loading{position:fixed; inset:0; display:flex; flex-direction:column; gap:12px; align-items:center; justify-content:center; z-index:20; color:#9fb3dd; font-size:14px; background:#04060f}
+  .lbl{position:fixed; transform:translate(-50%,-130%); font-size:11px; pointer-events:none; white-space:nowrap; color:var(--fg); text-shadow:0 0 6px rgba(0,0,0,.5); z-index:5}
+  body.light .lbl{text-shadow:0 0 6px rgba(255,255,255,.7)}
+  .glbl{position:fixed; transform:translate(-50%,-50%); font-size:13px; letter-spacing:.15em; pointer-events:none; white-space:nowrap; color:var(--fg-dim); opacity:.75; z-index:4; transition:opacity 2.5s}
+  .lbl.sel{font-weight:700; font-size:12.5px; color:var(--accent)}
+</style>
+</head>
+<body class="dark">
+<canvas id="c"></canvas>
+<div id="loading"><div>HuggingFace 우주 생성 중…</div><div id="loadMsg" style="font-size:12px;color:#5f6f95">모델 메타데이터 수집</div></div>
+<div id="topbar" class="panel">
+  <input id="q" placeholder="huggingface.co 모델 링크 또는 org/model 입력 (예: Qwen/Qwen3-8B)">
+  <button id="goBtn">탐색</button>
+  <button id="modeBtn">☀ 백우주로</button>
+</div>
+<div id="hint" class="panel">드래그 회전 · 휠 줌 · 별 클릭 = 선택 | 흑=태스크 우주, 백=도메인 우주</div>
+<div id="info" class="panel"></div>
+<div id="legend" class="panel"></div>
+
+<script>
+/* ================= 설정 ================= */
+const TASKS = [ // 흑우주(태스크) 은하 — 모달리티끼리 인접 배치, image-to-text 등은 다리 은하
+  {tag:'text-generation',              name:'텍스트 생성',   center:[-150, 15,-25], hue:210},
+  {tag:'translation',                  name:'번역',         center:[-95,-35, 65], hue:190},
+  {tag:'sentence-similarity',          name:'문장 유사도',   center:[-75, 55,-95], hue:230},
+  {tag:'image-to-text',                name:'이미지→텍스트', center:[ 10, 25, 30], hue:280}, // Vision-NLP 다리
+  {tag:'text-to-image',                name:'텍스트→이미지', center:[115, 35,-45], hue:320},
+  {tag:'image-classification',         name:'이미지 분류',   center:[150,-25, 60], hue:0},
+  {tag:'automatic-speech-recognition', name:'음성 인식',     center:[-25,-70,-85], hue:140}, // Audio
+  {tag:'text-to-speech',               name:'음성 합성',     center:[ 40,-80, 45], hue:110},
+];
+const DOMAINS = [ // 백우주(응용 도메인) 은하 — 태그/이름/README 단서에서 추론(데모는 키워드 휴리스틱)
+  {key:'code',  name:'코드·개발',      center:[-135, 30,-30], hue:215},
+  {key:'bio',   name:'의료·생명',      center:[-60,-55, 90],  hue:150},
+  {key:'lawfin',name:'법률·금융',      center:[ 25, 75,-110], hue:45},
+  {key:'sci',   name:'수학·과학',      center:[110, 50, 55],  hue:265},
+  {key:'chat',  name:'대화·어시스턴트', center:[-150,-30, 40], hue:200},
+  {key:'art',   name:'예술·창작',      center:[140,-40,-60],  hue:325},
+  {key:'voice', name:'음성·음악',      center:[ 45,-85, 30],  hue:120},
+  {key:'embed', name:'검색·임베딩',    center:[-45, 80, 70],  hue:235},
+  {key:'multi', name:'다국어',        center:[ 80, 10,-130], hue:185},
+  {key:'gen',   name:'일반·범용',      center:[  0,  0,  0],  hue:30},
+];
+const PER_TASK = 80, DUST_N = 18000, TRANS_MS = 5000;
+
+/* ================= 도메인 추론 ================= */
+function inferDomain(m){
+  const t = (m.id + ' ' + m.tags.join(' ')).toLowerCase();
+  const langCodes = m.tags.filter(x=>/^[a-z]{2}$/.test(x)).length;
+  if(/(^|[^a-z])(code|coder|sql|starcoder|codellama|codegen)/.test(t)) return 'code';
+  if(/(medic|biomed|bio[^a-z]|clinic|pubmed|protein|chem|health|drug)/.test(t)) return 'bio';
+  if(/(legal|law[^a-z]|finance|financial|fingpt|stock)/.test(t)) return 'lawfin';
+  if(/(math|theorem|physics|science|reason)/.test(t)) return 'sci';
+  if(/(music|sing)/.test(t) || m.pipe==='automatic-speech-recognition' || m.pipe==='text-to-speech' || /(whisper|speech|voice|vits|tts)/.test(t)) return 'voice';
+  if(m.pipe==='sentence-similarity' || /(embed|rerank|retrieval|bge-|gte-|e5-)/.test(t)) return 'embed';
+  if(/(anime|waifu|cartoon|comic|artstyle|dreambooth|photoreal)/.test(t)) return 'art';
+  if(langCodes>2 || m.pipe==='translation' || /(multilingual|korean|japanese|chinese)/.test(t)) return 'multi';
+  if(m.tags.includes('conversational') || /(instruct|chat|assistant)/.test(t)) return 'chat';
+  return 'gen';
+}
+
+/* ================= 유틸 ================= */
+const STOP = /^(transformers|pytorch|tf|jax|safetensors|onnx|gguf|diffusers|endpoints_compatible|text-generation-inference|text-embeddings-inference|autotrain_compatible|eval-results|model-index|region:.*|license:.*|deploy:.*|base_model:.*|dataset:.*|arxiv:.*)$/;
+function parseModel(raw){
+  const tags = raw.tags||[];
+  const fam = tags.filter(x=>x.startsWith('base_model:')&&!x.includes(':finetune:')&&!x.includes(':quantized:')&&!x.includes(':adapter:')&&!x.includes(':merge:')).map(x=>x.slice(11));
+  return {
+    id: raw.id, author: raw.id.split('/')[0], dl: raw.downloads||0, likes: raw.likes||0,
+    pipe: raw.pipeline_tag, tags, created: (raw.createdAt||'').slice(0,4),
+    family: fam[0] || raw.id,
+    datasets: new Set(tags.filter(x=>x.startsWith('dataset:')).map(x=>x.slice(8))),
+    arxivs: new Set(tags.filter(x=>x.startsWith('arxiv:'))),
+    info: new Set(tags.filter(x=>!STOP.test(x))),
+  };
+}
+function discPos(center, rank, n, rng){ // 은하 원반: 상위 모델일수록 중심
+  const r = 6 + 46*Math.pow(rank/Math.max(n-1,1), .72);
+  const a = rank*2.399963 + r*.05 + rng*6.28;
+  return [center[0]+r*Math.cos(a), center[1]+(rng-.5)*2*(4+r*.12), center[2]+r*Math.sin(a)];
+}
+function hsl(h,s,l){ const c=new THREE.Color(); c.setHSL(h/360,s,l); return c; }
+function mulberry(seed){ return ()=>{ seed|=0; seed=seed+0x6D2B79F5|0; let z=Math.imul(seed^seed>>>15,1|seed); z=z+Math.imul(z^z>>>7,61|z)^z; return ((z^z>>>14)>>>0)/4294967296; }; }
+const rng = mulberry(42);
+
+/* ================= 데이터 수집 (HF API, CORS 허용) ================= */
+let STARS = [];
+async function loadData(){
+  const results = await Promise.allSettled(TASKS.map(t=>
+    fetch(`https://huggingface.co/api/models?filter=${t.tag}&sort=downloads&limit=${PER_TASK}`).then(r=>r.json())
+  ));
+  const seen = new Set();
+  results.forEach((res,gi)=>{
+    if(res.status!=='fulfilled' || !Array.isArray(res.value)) return;
+    res.value.forEach((raw,rank)=>{
+      if(seen.has(raw.id)) return; seen.add(raw.id);
+      const m = parseModel(raw);
+      m.gA = gi; m.rankA = rank;
+      STARS.push(m);
+    });
+  });
+  if(STARS.length < 50) throw new Error('API 응답 부족');
+  // 도메인(백우주) 소속 + 순위
+  STARS.forEach(m=>{ m.gB = DOMAINS.findIndex(d=>d.key===inferDomain(m)); });
+  DOMAINS.forEach((d,di)=>{
+    STARS.filter(m=>m.gB===di).sort((a,b)=>b.dl-a.dl).forEach((m,i,arr)=>{ m.rankB=i; m.nB=arr.length; });
+  });
+  // 좌표 2벌 + 시각 속성
+  const nA = {}; STARS.forEach(m=>nA[m.gA]=(nA[m.gA]||0)+1);
+  STARS.forEach(m=>{
+    m.seed = rng();
+    m.posA = discPos(TASKS[m.gA].center, m.rankA, nA[m.gA], m.seed);
+    m.posB = discPos(DOMAINS[m.gB].center, m.rankB, m.nB, m.seed);
+    m.size = 2.2 + Math.min(1, Math.log10(m.dl+1)/8.2)*7.5;
+    m.delay = (m.gA/TASKS.length)*.34 + Math.min(m.rankA/PER_TASK,1)*.18 + m.seed*.06; // 은하별 물결 + 순위 스태거
+    m.colA = hsl(TASKS[m.gA].hue, .75, .72);   // 흑우주: 밝은 별
+    m.colB = hsl(DOMAINS[m.gB].hue, .8, .34);  // 백우주: 종이 위 잉크 별
+  });
+}
+
+/* ================= 렌더러/셰이더 ================= */
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, 1, .1, 4000);
+camera.position.set(0, 90, 430);
+const target = new THREE.Vector3(0,0,0);
+
+const VSH = `
+attribute vec3 posB; attribute vec3 colA; attribute vec3 colB;
+attribute float size; attribute float delay; attribute float seed;
+uniform float uT; uniform float uTime; uniform float uPix;
+varying vec3 vColor; varying float vSeed;
+void main(){
+  float k = clamp((uT - delay)/0.4, 0.0, 1.0);
+  float s = k*k*(3.0-2.0*k);
+  vec3 arc = normalize(vec3(sin(seed*12.9), cos(seed*7.7), sin(seed*5.3+1.7)));
+  float d = distance(position, posB);
+  vec3 p = mix(position, posB, s) + arc*sin(3.14159*s)*d*0.28;
+  vColor = mix(colA, colB, s); vSeed = seed;
+  vec4 mv = modelViewMatrix*vec4(p,1.0);
+  float tw = 1.0 + 0.18*sin(uTime*2.2 + seed*80.0);
+  gl_PointSize = size*tw*uPix*140.0/max(-mv.z,1.0);
+  gl_Position = projectionMatrix*mv;
+}`;
+const FSH = `
+uniform float uAlpha; varying vec3 vColor; varying float vSeed;
+void main(){
+  float d = length(gl_PointCoord-0.5);
+  float a = smoothstep(0.5, 0.12, d);
+  float core = smoothstep(0.18, 0.0, d)*0.9;
+  gl_FragColor = vec4(vColor + core, a*uAlpha);
+  if(gl_FragColor.a < 0.02) discard;
+}`;
+const materials = [];
+function makeMat(alpha){
+  const m = new THREE.ShaderMaterial({
+    uniforms:{uT:{value:0}, uTime:{value:0}, uPix:{value:renderer.getPixelRatio()}, uAlpha:{value:alpha}},
+    vertexShader:VSH, fragmentShader:FSH, transparent:true, depthWrite:false,
+  });
+  materials.push(m); return m;
+}
+function buildPoints(list, alpha){
+  const n = list.length, g = new THREE.BufferGeometry();
+  const pA=new Float32Array(n*3), pB=new Float32Array(n*3), cA=new Float32Array(n*3), cB=new Float32Array(n*3);
+  const sz=new Float32Array(n), dl=new Float32Array(n), sd=new Float32Array(n);
+  list.forEach((m,i)=>{
+    pA.set(m.posA,i*3); pB.set(m.posB,i*3);
+    cA.set([m.colA.r,m.colA.g,m.colA.b],i*3); cB.set([m.colB.r,m.colB.g,m.colB.b],i*3);
+    sz[i]=m.size; dl[i]=m.delay; sd[i]=m.seed;
+  });
+  g.setAttribute('position',new THREE.BufferAttribute(pA,3));
+  g.setAttribute('posB',new THREE.BufferAttribute(pB,3));
+  g.setAttribute('colA',new THREE.BufferAttribute(cA,3));
+  g.setAttribute('colB',new THREE.BufferAttribute(cB,3));
+  g.setAttribute('size',new THREE.BufferAttribute(sz,1));
+  g.setAttribute('delay',new THREE.BufferAttribute(dl,1));
+  g.setAttribute('seed',new THREE.BufferAttribute(sd,1));
+  const pts = new THREE.Points(g, makeMat(alpha));
+  pts.frustumCulled = false;
+  scene.add(pts); return pts;
+}
+function buildDust(){ // Tier2 개념: 실별 주변에 뿌리는 별먼지 (양쪽 좌표 모두 실별 기준 지터)
+  const list=[];
+  for(let i=0;i<DUST_N;i++){
+    const m = STARS[(rng()*STARS.length)|0], j=()=> (rng()-.5)*26;
+    const dim = .25+rng()*.3;
+    list.push({posA:[m.posA[0]+j(),m.posA[1]+j()*.5,m.posA[2]+j()],
+               posB:[m.posB[0]+j(),m.posB[1]+j()*.5,m.posB[2]+j()],
+               colA:m.colA.clone().multiplyScalar(dim), colB:m.colB.clone().lerp(new THREE.Color('#f5f2ea'),.55),
+               size:.8+rng()*1.4, delay:m.delay+(rng()-.5)*.08, seed:rng()});
+  }
+  return buildPoints(list, .5);
+}
+
+/* ================= 우주 전환 (흑↔백) ================= */
+const BG_DARK = new THREE.Color('#04060f'), BG_LIGHT = new THREE.Color('#f5f2ea');
+let mode = 0;          // 0=흑(태스크), 1=백(도메인)
+let uT = 0, transFrom = 0, transStart = -1;
+function switchMode(){
+  transFrom = uT; transStart = performance.now();
+  mode = 1-mode;
+  document.body.className = mode? 'light':'dark';
+  document.getElementById('modeBtn').textContent = mode? '☾ 흑우주로':'☀ 백우주로';
+  galaxyLabels.forEach(l=>{ l.el.style.opacity = (l.uni===mode)? .75 : 0; });
+}
+function ease01(x){ return x<0?0:x>1?1:x*x*(3-2*x); }
+function starPos(m, t, out){ // 셰이더와 동일한 경로를 CPU에서 재현 (라벨·연결선·피킹용)
+  const k = ease01((t - m.delay)/0.4);
+  const ax=Math.sin(m.seed*12.9), ay=Math.cos(m.seed*7.7), az=Math.sin(m.seed*5.3+1.7);
+  const al=Math.sqrt(ax*ax+ay*ay+az*az);
+  const dx=m.posB[0]-m.posA[0], dy=m.posB[1]-m.posA[1], dz=m.posB[2]-m.posA[2];
+  const d=Math.sqrt(dx*dx+dy*dy+dz*dz), arc=Math.sin(Math.PI*k)*d*0.28/al;
+  out.set(m.posA[0]+dx*k+ax*arc, m.posA[1]+dy*k+ay*arc, m.posA[2]+dz*k+az*arc);
+  return out;
+}
+
+/* ================= 연관 별 연결 ================= */
+let selected=null, related=[], lineStrong=null, lineWeak=null;
+function relScore(a,b){
+  let s=0;
+  if(a.family===b.family) s+=5;
+  if(a.family===b.id || b.family===a.id) s+=6;
+  let shared=0; a.datasets.forEach(x=>{if(b.datasets.has(x))shared++;}); s+=Math.min(shared,3)*2;
+  let ax=0; a.arxivs.forEach(x=>{if(b.arxivs.has(x))ax++;}); s+=Math.min(ax,2)*2;
+  if(a.author===b.author) s+=1.5;
+  let ov=0; a.info.forEach(x=>{if(b.info.has(x))ov++;}); s+=Math.min(ov,4)*.35;
+  if(a.gA===b.gA) s+=.4;
+  if(s<1) return 0;
+  return s*(1+Math.log10(b.dl+1)/4); // 연관성 × 인기 가중
+}
+function select(m){
+  selected = m;
+  related = STARS.filter(x=>x!==m).map(x=>({m:x, s:relScore(m,x)}))
+                 .filter(x=>x.s>0).sort((a,b)=>b.s-a.s).slice(0,10);
+  rebuildLines(); renderInfo(m); flyTo(m);
+}
+function rebuildLines(){
+  [lineStrong,lineWeak].forEach(l=>{ if(l){scene.remove(l); l.geometry.dispose();} });
+  lineStrong=lineWeak=null;
+  if(!selected) return;
+  const mk=(pairs,op)=>{
+    if(!pairs.length) return null;
+    const g=new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pairs.length*6),3));
+    const l=new THREE.LineSegments(g, new THREE.LineBasicMaterial({color:mode?0x6b5433:0x9db8ee, transparent:true, opacity:op}));
+    l.frustumCulled=false; scene.add(l); return l;
+  };
+  lineStrong = mk(related.filter(r=>r.s>=6), .85);
+  lineWeak   = mk(related.filter(r=>r.s<6),  .28);
+}
+const _v = new THREE.Vector3();
+function updateLines(){
+  if(!selected) return;
+  const sp = starPos(selected, uT, new THREE.Vector3());
+  const fill=(line,list)=>{
+    if(!line) return;
+    const arr=line.geometry.attributes.position.array;
+    list.forEach((r,i)=>{ starPos(r.m,uT,_v); arr.set([sp.x,sp.y,sp.z,_v.x,_v.y,_v.z],i*6); });
+    line.geometry.attributes.position.needsUpdate=true;
+    line.material.color.set(mode?0x6b5433:0x9db8ee);
+  };
+  fill(lineStrong, related.filter(r=>r.s>=6));
+  fill(lineWeak,   related.filter(r=>r.s<6));
+}
+
+/* ================= 라벨 ================= */
+let starLabels=[], galaxyLabels=[];
+function makeLabels(){
+  TASKS.forEach((t,i)=>galaxyLabels.push({uni:0, pos:new THREE.Vector3(...t.center), el:addDiv('glbl',t.name)}));
+  DOMAINS.forEach((d,i)=>galaxyLabels.push({uni:1, pos:new THREE.Vector3(...d.center), el:addDiv('glbl',d.name)}));
+  galaxyLabels.forEach(l=>{ l.el.style.opacity = l.uni===0? .75:0; });
+}
+function addDiv(cls, txt){ const e=document.createElement('div'); e.className=cls; e.textContent=txt; document.body.appendChild(e); return e; }
+function syncStarLabels(){
+  starLabels.forEach(l=>l.el.remove()); starLabels=[];
+  if(!selected) return;
+  starLabels.push({m:selected, el:addDiv('lbl sel', selected.id)});
+  related.forEach(r=>starLabels.push({m:r.m, el:addDiv('lbl', r.m.id.split('/').pop())}));
+}
+function projectLabels(){
+  const w=innerWidth, h=innerHeight;
+  const place=(el,p)=>{ _v.copy(p).project(camera);
+    const vis=_v.z<1 && Math.abs(_v.x)<1.1 && Math.abs(_v.y)<1.1;
+    el.style.display=vis?'block':'none';
+    if(vis){ el.style.left=(_v.x*.5+.5)*w+'px'; el.style.top=(-_v.y*.5+.5)*h+'px'; } };
+  const tmp=new THREE.Vector3();
+  starLabels.forEach(l=>place(l.el, starPos(l.m,uT,tmp)));
+  galaxyLabels.forEach(l=>place(l.el,l.pos));
+}
+
+/* ================= 카메라/조작 ================= */
+let sph = {r:440, th:0, ph:1.35}, drag=null, camAnim=null;
+function applyCam(){
+  camera.position.set(
+    target.x + sph.r*Math.sin(sph.ph)*Math.sin(sph.th),
+    target.y + sph.r*Math.cos(sph.ph),
+    target.z + sph.r*Math.sin(sph.ph)*Math.cos(sph.th));
+  camera.lookAt(target);
+}
+canvas.addEventListener('pointerdown',e=>{ drag={x:e.clientX,y:e.clientY,moved:false}; });
+addEventListener('pointermove',e=>{
+  if(!drag) return;
+  const dx=e.clientX-drag.x, dy=e.clientY-drag.y;
+  if(Math.abs(dx)+Math.abs(dy)>4) drag.moved=true;
+  sph.th-=dx*.005; sph.ph=Math.max(.15,Math.min(3.0,sph.ph-dy*.005));
+  drag.x=e.clientX; drag.y=e.clientY; camAnim=null; applyCam();
+});
+addEventListener('pointerup',e=>{
+  if(drag && !drag.moved) pick(e.clientX,e.clientY);
+  drag=null;
+});
+canvas.addEventListener('wheel',e=>{ sph.r=Math.max(40,Math.min(1500,sph.r*(1+e.deltaY*.001))); camAnim=null; applyCam(); },{passive:true});
+function pick(px,py){
+  let best=null, bd=14;
+  const tmp=new THREE.Vector3();
+  STARS.forEach(m=>{
+    starPos(m,uT,tmp).project(camera);
+    if(tmp.z>1) return;
+    const sx=(tmp.x*.5+.5)*innerWidth, sy=(-tmp.y*.5+.5)*innerHeight;
+    const d=Math.hypot(sx-px,sy-py) - m.size*.4;
+    if(d<bd){ bd=d; best=m; }
+  });
+  if(best){ select(best); syncStarLabels(); }
+}
+function flyTo(m){
+  const to = starPos(m, mode, new THREE.Vector3());
+  camAnim = {t0:performance.now(), from:target.clone(), to, r0:sph.r, r1:Math.max(70, m.size*14)};
+}
+
+/* ================= 검색 ================= */
+async function search(){
+  let q=document.getElementById('q').value.trim();
+  if(!q) return;
+  q=q.replace(/^https?:\/\/(www\.)?huggingface\.co\//,'').split('?')[0].replace(/\/(tree|blob)\/.*$/,'').replace(/\/$/,'');
+  if(/^(datasets|spaces)\//.test(q)){ alert('데모는 모델 링크만 지원해요.'); return; }
+  let m = STARS.find(x=>x.id.toLowerCase()===q.toLowerCase())
+       || STARS.find(x=>x.id.toLowerCase().includes(q.toLowerCase()));
+  if(!m){ // 미수집 모델 → 실시간 조회 후 즉석 배치
+    try{
+      const raw = await (await fetch('https://huggingface.co/api/models/'+q)).json();
+      if(!raw.id) throw 0;
+      m = parseModel(raw);
+      const parent = STARS.find(x=>x.id===m.family || x.family===m.family);
+      m.gA = Math.max(0, TASKS.findIndex(t=>t.tag===m.pipe)); if(m.gA<0) m.gA=0;
+      m.gB = DOMAINS.findIndex(d=>d.key===inferDomain(m));
+      m.seed=rng(); m.rankA=PER_TASK; m.rankB=30;
+      const base = parent||null;
+      m.posA = base? base.posA.map(v=>v+(rng()-.5)*18) : discPos(TASKS[m.gA].center, 60, PER_TASK, m.seed);
+      m.posB = base? base.posB.map(v=>v+(rng()-.5)*18) : discPos(DOMAINS[m.gB].center, 30, 60, m.seed);
+      m.size = 2.2+Math.min(1,Math.log10(m.dl+1)/8.2)*7.5;
+      m.delay = .3+m.seed*.2;
+      m.colA = hsl(TASKS[m.gA].hue,.75,.72); m.colB = hsl(DOMAINS[m.gB].hue,.8,.34);
+      STARS.push(m);
+      scene.remove(starPoints); starPoints = buildPoints(STARS, 1); // 재빌드(데모 규모라 즉시)
+    }catch(e){ alert('모델을 찾지 못했어요: '+q); return; }
+  }
+  select(m); syncStarLabels();
+}
+document.getElementById('goBtn').onclick=search;
+document.getElementById('q').addEventListener('keydown',e=>{ if(e.key==='Enter') search(); });
+document.getElementById('modeBtn').onclick=switchMode;
+
+/* ================= 정보 패널 ================= */
+function renderInfo(m){
+  const el=document.getElementById('info');
+  el.style.display='block';
+  el.innerHTML = `<h3>${m.id}</h3>
+   <div class="dim">${TASKS[m.gA].name} 은하 · ${DOMAINS[m.gB].name} (백우주) · ${m.created||'?'}년</div>
+   <div>다운로드 <b>${m.dl.toLocaleString()}</b> · ♥ ${m.likes.toLocaleString()}</div>
+   <div class="dim">연관 별 ${related.length}개 연결됨 (실선=강한 연관)</div>
+   <a href="https://huggingface.co/${m.id}" target="_blank">HuggingFace에서 열기 ↗</a>`;
+}
+document.getElementById('legend').innerHTML =
+  `<b>흑우주</b> 은하 = 태스크(pipeline_tag)<br><b>백우주</b> 은하 = 응용 도메인(추론)<br>별 크기 = 다운로드 · 별먼지 = Tier2 개념`;
+
+/* ================= 메인 루프 ================= */
+let starPoints=null;
+function animate(now){
+  requestAnimationFrame(animate);
+  if(transStart>=0){
+    const p=Math.min((now-transStart)/TRANS_MS,1);
+    uT = transFrom + (mode-transFrom)*p;
+    renderer.setClearColor(BG_DARK.clone().lerp(BG_LIGHT, ease01(uT)));
+    if(p>=1) transStart=-1;
+  }
+  if(camAnim){
+    const k=ease01((now-camAnim.t0)/1300);
+    target.copy(camAnim.from).lerp(camAnim.to,k);
+    sph.r=camAnim.r0+(camAnim.r1-camAnim.r0)*k;
+    applyCam(); if(k>=1) camAnim=null;
+  }
+  materials.forEach(m=>{ m.uniforms.uT.value=uT; m.uniforms.uTime.value=now*.001; });
+  updateLines(); projectLabels();
+  renderer.render(scene,camera);
+}
+function resize(){
+  renderer.setSize(innerWidth,innerHeight);
+  camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+}
+addEventListener('resize',resize);
+
+/* ================= 시작 ================= */
+(async ()=>{
+  try{ await loadData(); }
+  catch(e){ document.getElementById('loadMsg').textContent='HF API 접속 실패 — 네트워크를 확인하세요'; return; }
+  document.getElementById('loading').remove();
+  renderer.setClearColor(BG_DARK);
+  starPoints = buildPoints(STARS,1);
+  buildDust();
+  makeLabels(); resize(); applyCam();
+  requestAnimationFrame(animate);
+})();
+</script>
+</body>
+</html>
