@@ -38,12 +38,28 @@
   button{background:transparent; color:var(--fg); border:1px solid var(--line); border-radius:999px; padding:8px 16px; font-size:13px; cursor:pointer; font-family:inherit; font-weight:600}
   button:hover{border-color:var(--accent); color:var(--accent); box-shadow:0 0 18px var(--glow)}
   #modeBtn{font-weight:700; min-width:120px}
-  #info{left:14px; bottom:14px; max-width:320px; font-size:12.5px; line-height:1.55; display:none; z-index:10}
+  #info{left:14px; bottom:14px; max-width:300px; font-size:12.5px; line-height:1.55; display:none; z-index:10}
   #info h3{font-size:14px; margin-bottom:4px; word-break:break-all}
   #info a{color:var(--accent)}
   #info .dim{color:var(--fg-dim)}
-  #legend{right:14px; bottom:14px; font-size:11.5px; line-height:1.7; color:var(--fg-dim); z-index:10}
-  #legend b{color:var(--fg)}
+  #filters{left:14px; top:76px; width:236px; max-height:calc(100vh - 300px); overflow-y:auto; font-size:12px; z-index:10}
+  #filters h4{font-size:10.5px; letter-spacing:.18em; text-transform:uppercase; color:var(--fg-dim); margin:12px 0 6px}
+  #filters h4:first-child{margin-top:2px}
+  #filters select{width:100%; background:transparent; color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:6px 8px; font-size:12px; font-family:inherit; outline:none}
+  #filters select option, #filters select optgroup{background:#141a2e; color:#dfe6f5}
+  body.light #filters select option, body.light #filters select optgroup{background:#faf7f0; color:#2e2820}
+  .chip{display:inline-block; padding:3px 9px; border:1px solid var(--line); border-radius:999px; margin:0 4px 5px 0; cursor:pointer; font-size:10.5px; color:var(--fg-dim); user-select:none}
+  .chip.on{color:var(--accent); border-color:var(--accent); background:var(--glow)}
+  #legendSec{font-size:11px; line-height:1.7; color:var(--fg-dim)}
+  #legendSec b{color:var(--fg)}
+  #related{right:14px; bottom:14px; width:310px; max-height:46vh; overflow-y:auto; font-size:12px; display:none; z-index:10}
+  #related h4{font-size:10.5px; letter-spacing:.18em; text-transform:uppercase; color:var(--fg-dim); margin-bottom:4px}
+  #related ol{margin:4px 0 0 18px; padding:0}
+  #related li{margin-bottom:9px; cursor:pointer; line-height:1.45}
+  #related li:hover .rname{color:var(--accent)}
+  #related .rname{font-weight:600; word-break:break-all}
+  #related .rmeta{color:var(--fg-dim); font-size:10.5px}
+  #related .rsum{color:var(--fg-dim); font-size:11px}
   #hint{top:72px; left:50%; transform:translateX(-50%); font-size:11px; color:var(--fg-dim); z-index:9; padding:5px 14px; border-radius:999px; letter-spacing:.01em}
   #loading{position:fixed; inset:0; display:flex; flex-direction:column; gap:12px; align-items:center; justify-content:center; z-index:20; color:#9fb3dd; font-size:14px; background:#04060f}
   .lbl{position:fixed; transform:translate(-50%,-130%); font-size:11px; pointer-events:none; white-space:nowrap; color:var(--fg); text-shadow:0 0 6px rgba(0,0,0,.5); z-index:5}
@@ -72,7 +88,24 @@
 </div>
 <div id="hint" class="panel">클릭 = 이동 · Ctrl+클릭 = HF 열기 · WASD = 유영(Shift 가속) · 선 위 커서 = 반대편 별 정보</div>
 <div id="info" class="panel"></div>
-<div id="legend" class="panel"></div>
+<div id="filters" class="panel">
+  <h4>은하 선택</h4>
+  <select id="galaxySel"><option value="">— 은하로 이동 —</option></select>
+  <h4>내 메모리 (VRAM/RAM)</h4>
+  <select id="memSel">
+    <option value="0">제한 없음</option>
+    <option value="4">4 GB 이하 구동</option>
+    <option value="8">8 GB 이하 구동</option>
+    <option value="16">16 GB 이하 구동</option>
+    <option value="24">24 GB 이하 구동</option>
+    <option value="48">48 GB 이하 구동</option>
+  </select>
+  <h4>태그 (다중선택 AND)</h4>
+  <div id="tagChips"></div>
+  <h4>범례</h4>
+  <div id="legendSec"></div>
+</div>
+<div id="related" class="panel"><h4>연관 별</h4><ol id="relList"></ol></div>
 
 <script>
 /* ================= 설정 ================= */
@@ -248,23 +281,23 @@ const target = new THREE.Vector3(0,0,0);
 
 const VSH = `
 attribute vec3 posB; attribute vec3 colA; attribute vec3 colB;
-attribute float size; attribute float delay; attribute float seed; attribute float planet; attribute float heat;
+attribute float size; attribute float delay; attribute float seed; attribute float planet; attribute float heat; attribute float vis;
 uniform float uT; uniform float uTime; uniform float uPix;
-varying vec3 vColor; varying float vSeed; varying float vSize; varying float vPlanet; varying float vHeat;
+varying vec3 vColor; varying float vSeed; varying float vSize; varying float vPlanet; varying float vHeat; varying float vVis;
 void main(){
   float k = clamp((uT - delay)/0.4, 0.0, 1.0);
   float s = k*k*(3.0-2.0*k);
   vec3 arc = normalize(vec3(sin(seed*12.9), cos(seed*7.7), sin(seed*5.3+1.7)));
   float d = distance(position, posB);
   vec3 p = mix(position, posB, s) + arc*sin(3.14159*s)*d*0.28;
-  vColor = mix(colA, colB, s); vSeed = seed; vSize = size; vPlanet = planet; vHeat = heat;
+  vColor = mix(colA, colB, s); vSeed = seed; vSize = size; vPlanet = planet; vHeat = heat; vVis = vis;
   vec4 mv = modelViewMatrix*vec4(p,1.0);
   float tw = 1.0 + 0.18*sin(uTime*2.2 + seed*80.0)*(1.0-planet); // 행성은 반짝이지 않음
   gl_PointSize = min(size*tw*uPix*140.0/max(-mv.z,1.0), 700.0);
   gl_Position = projectionMatrix*mv;
 }`;
 const FSH = `
-uniform float uAlpha; varying vec3 vColor; varying float vSeed; varying float vSize; varying float vPlanet; varying float vHeat;
+uniform float uAlpha; varying vec3 vColor; varying float vSeed; varying float vSize; varying float vPlanet; varying float vHeat; varying float vVis;
 void main(){
   vec2 uv = gl_PointCoord - 0.5;
   float d = length(uv);
@@ -301,6 +334,7 @@ void main(){
     col = vColor*(0.8+core*1.1) + vec3(1.0)*core*0.4;
   }
   a *= smoothstep(0.5, 0.42, d); // 스프라이트 사각 경계에서 완전 소멸 → 네모 박스 제거
+  a *= vVis; // 필터로 숨김
   gl_FragColor = vec4(col, a);
   if(a < 0.02) discard;
 }`;
@@ -315,11 +349,11 @@ function makeMat(alpha){
 function buildPoints(list, alpha){
   const n = list.length, g = new THREE.BufferGeometry();
   const pA=new Float32Array(n*3), pB=new Float32Array(n*3), cA=new Float32Array(n*3), cB=new Float32Array(n*3);
-  const sz=new Float32Array(n), dl=new Float32Array(n), sd=new Float32Array(n), pl=new Float32Array(n), ht=new Float32Array(n);
+  const sz=new Float32Array(n), dl=new Float32Array(n), sd=new Float32Array(n), pl=new Float32Array(n), ht=new Float32Array(n), vs=new Float32Array(n);
   list.forEach((m,i)=>{
     pA.set(m.posA,i*3); pB.set(m.posB,i*3);
     cA.set([m.colA.r,m.colA.g,m.colA.b],i*3); cB.set([m.colB.r,m.colB.g,m.colB.b],i*3);
-    sz[i]=m.size; dl[i]=m.delay; sd[i]=m.seed; pl[i]=m.planet?1:0; ht[i]=m.heat||0;
+    sz[i]=m.size; dl[i]=m.delay; sd[i]=m.seed; pl[i]=m.planet?1:0; ht[i]=m.heat||0; vs[i]=(m.visible===false)?0:1;
   });
   g.setAttribute('position',new THREE.BufferAttribute(pA,3));
   g.setAttribute('posB',new THREE.BufferAttribute(pB,3));
@@ -330,6 +364,7 @@ function buildPoints(list, alpha){
   g.setAttribute('seed',new THREE.BufferAttribute(sd,1));
   g.setAttribute('planet',new THREE.BufferAttribute(pl,1));
   g.setAttribute('heat',new THREE.BufferAttribute(ht,1));
+  g.setAttribute('vis',new THREE.BufferAttribute(vs,1));
   const pts = new THREE.Points(g, makeMat(alpha));
   pts.frustumCulled = false;
   scene.add(pts); return pts;
@@ -384,6 +419,27 @@ function buildNebula(){
   nebulaMesh.frustumCulled=false; nebulaMesh.renderOrder=-1; scene.add(nebulaMesh);
 }
 
+/* ================= 은하 글로우 (소속 구역 표시) ================= */
+let glowsA=[], glowsB=[];
+function glowTex(){
+  const c=document.createElement('canvas'); c.width=c.height=128;
+  const x=c.getContext('2d'), g=x.createRadialGradient(64,64,0,64,64,64);
+  g.addColorStop(0,'rgba(255,255,255,.9)'); g.addColorStop(.4,'rgba(255,255,255,.35)'); g.addColorStop(1,'rgba(255,255,255,0)');
+  x.fillStyle=g; x.fillRect(0,0,128,128);
+  return new THREE.CanvasTexture(c);
+}
+function buildGlows(){
+  const tex=glowTex();
+  TASKS.forEach(t=>{ // 흑우주: 은은한 가산 발광 구름
+    const s=new THREE.Sprite(new THREE.SpriteMaterial({map:tex, color:hsl(t.hue,.7,.45), transparent:true, opacity:.14, blending:THREE.AdditiveBlending, depthWrite:false}));
+    s.position.set(...t.center); s.scale.set(260,170,1); scene.add(s); glowsA.push(s);
+  });
+  DOMAINS.forEach(d=>{ // 백우주: 종이 위 파스텔 워시
+    const s=new THREE.Sprite(new THREE.SpriteMaterial({map:tex, color:hsl(d.hue,.45,.62), transparent:true, opacity:0, depthWrite:false}));
+    s.position.set(...d.center); s.scale.set(260,170,1); scene.add(s); glowsB.push(s);
+  });
+}
+
 /* ================= 블룸 후처리 (three.js 예제, MIT) ================= */
 let composer=null, bloomPass=null;
 function setupComposer(){
@@ -436,7 +492,7 @@ function select(m){
   selected = m;
   related = STARS.filter(x=>x!==m).map(x=>({m:x, s:relScore(m,x)}))
                  .filter(x=>x.s>0).sort((a,b)=>b.s-a.s).slice(0,10);
-  rebuildLines(); renderInfo(m); flyTo(m);
+  rebuildLines(); renderInfo(m); renderRelated(); flyTo(m);
 }
 function rebuildLines(){
   [lineStrong,lineWeak].forEach(l=>{ if(l){scene.remove(l); l.geometry.dispose();} });
@@ -573,7 +629,7 @@ function projectLabels(){
     if(vis){ el.style.left=(_v.x*.5+.5)*w+'px'; el.style.top=((-_v.y*.5+.5)*h+(dy||0))+'px'; } };
   starLabels.forEach(l=>place(l.el, starPos(l.m,uT,tmp)));
   pLabels.forEach(l=>{
-    if(selectionIds.has(l.m.id) || l.m===hoverStar){ l.el.style.display='none'; return; }
+    if(selectionIds.has(l.m.id) || l.m===hoverStar || l.m.visible===false){ l.el.style.display='none'; return; }
     place(l.el, starPos(l.m,uT,tmp));
   });
   galaxyLabels.forEach(l=>place(l.el,l.pos));
@@ -645,6 +701,7 @@ function pickAt(px,py){
   let best=null, bd=15;
   const tmp=new THREE.Vector3();
   STARS.forEach(m=>{
+    if(m.visible===false) return;
     starPos(m,uT,tmp).project(camera);
     if(tmp.z>1) return;
     const sx=(tmp.x*.5+.5)*innerWidth, sy=(-tmp.y*.5+.5)*innerHeight;
@@ -722,8 +779,84 @@ function renderInfo(m){
    <div class="dim">연관 별 ${related.length}개 연결됨 (실선=강한 연관)</div>
    <a href="https://huggingface.co/${m.id}" target="_blank">HuggingFace에서 열기 ↗</a>`;
 }
-document.getElementById('legend').innerHTML =
-  `<b>행성</b> = 트렌딩 1~5위 (중심·위성은하)<br><b>중간 항성</b>(십자빛) = 다운로드·좋아요 상위<br>작은 별 = 그 외 · 별먼지 = Tier2`;
+document.getElementById('legendSec').innerHTML =
+  `<b>행성</b> = 트렌딩 1~5위 (중심·위성은하)<br><b>중간 항성</b>(십자빛) = 다운로드·좋아요 상위<br>작은 별 = 항성 중력에 잡힌 위성 · 별먼지 = Tier2`;
+
+/* ================= 좌측 필터 ================= */
+let activeTags = new Set();
+function paramsOf(m){ // 모델명에서 파라미터 수 추정 (7b, 0.6B, 125m 등)
+  const s = m.id.split('/').pop().toLowerCase();
+  let x = s.match(/(\d+(?:\.\d+)?)b(?![a-z0-9])/);
+  if(x) return parseFloat(x[1])*1e9;
+  x = s.match(/(\d+(?:\.\d+)?)m(?![a-z0-9])/);
+  if(x && parseFloat(x[1])>=30) return parseFloat(x[1])*1e6;
+  return null;
+}
+function estGB(m){ // 대략적 필요 메모리: fp16 2바이트/파라미터, gguf(양자화)면 0.7
+  const p = paramsOf(m);
+  if(p===null) return null;
+  const bpp = m.tags.includes('gguf')? 0.7 : 2;
+  return p*bpp/1e9*1.15;
+}
+function applyFilters(){
+  const memV = +document.getElementById('memSel').value;
+  STARS.forEach(m=>{
+    const g = estGB(m);
+    const passMem = !memV || g===null || g<=memV;
+    let passTag = true; activeTags.forEach(t=>{ if(!m.info.has(t)) passTag=false; });
+    m.visible = passMem && passTag;
+  });
+  if(starPoints){
+    const arr = starPoints.geometry.attributes.vis.array;
+    STARS.forEach((m,i)=>arr[i]=m.visible?1:0);
+    starPoints.geometry.attributes.vis.needsUpdate = true;
+  }
+}
+function buildFilters(){
+  const gs = document.getElementById('galaxySel');
+  const og1 = document.createElement('optgroup'); og1.label='흑우주 · 태스크';
+  TASKS.forEach((t,i)=>{ const o=document.createElement('option'); o.value='A'+i; o.textContent=t.name; og1.appendChild(o); });
+  const og2 = document.createElement('optgroup'); og2.label='백우주 · 도메인';
+  DOMAINS.forEach((d,i)=>{ const o=document.createElement('option'); o.value='B'+i; o.textContent=d.name; og2.appendChild(o); });
+  gs.appendChild(og1); gs.appendChild(og2);
+  gs.onchange = ()=>{ // 은하 선택 → 그 은하 트렌딩 1위(중심 항성) 기준으로 재중심
+    const v = gs.value; if(!v) return;
+    const uni = v[0], gi = +v.slice(1);
+    if((uni==='B') !== (mode===1)) switchMode(); // 필요하면 우주 전환부터
+    const m = STARS.find(x=> uni==='A'? (x.gA===gi && x.rankA===0) : (x.gB===gi && x.rankB===0));
+    if(m){ select(m); syncStarLabels(); }
+  };
+  document.getElementById('memSel').onchange = applyFilters;
+  // 태그 칩: 정보성 태그 빈도 상위 24개
+  const freq = {};
+  STARS.forEach(m=>m.info.forEach(t=>{ if(!/^[a-z]{2}$/.test(t)) freq[t]=(freq[t]||0)+1; }));
+  const top = Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,24);
+  const box = document.getElementById('tagChips');
+  top.forEach(([t,c])=>{
+    const el = document.createElement('span'); el.className='chip'; el.textContent=`${t} ${c}`;
+    el.onclick = ()=>{ el.classList.toggle('on');
+      el.classList.contains('on')? activeTags.add(t) : activeTags.delete(t);
+      applyFilters(); };
+    box.appendChild(el);
+  });
+}
+
+/* ================= 연관 별 리스트 패널 ================= */
+function renderRelated(){
+  const panel = document.getElementById('related'), ol = document.getElementById('relList');
+  if(!selected || !related.length){ panel.style.display='none'; return; }
+  panel.style.display='block';
+  ol.innerHTML = related.map((r,i)=>
+    `<li data-i="${i}"><div class="rname">${i+1}. ${r.m.id}</div>
+     <div class="rmeta">♥ ${fmtK(r.m.likes)} · ⬇ ${fmtK(r.m.dl)} · ${TASKS[r.m.gA].name}${r.s>=6?' · 강한 연관':''}</div>
+     <div class="rsum" id="rsum${i}">…</div></li>`).join('');
+  ol.querySelectorAll('li').forEach(li=>{
+    li.onclick = ()=>{ const r=related[+li.dataset.i]; select(r.m); syncStarLabels(); };
+  });
+  related.forEach((r,i)=>fetchSummary(r.m).then(s=>{
+    const el=document.getElementById('rsum'+i); if(el) el.textContent = s || '(README 요약 없음)';
+  }));
+}
 
 /* ================= 메인 루프 ================= */
 let starPoints=null, lastNow=0;
@@ -748,6 +881,9 @@ function animate(now){
     nebulaMat.uniforms.uT.value=uT; nebulaMat.uniforms.uTime.value=now*.001;
     nebulaMesh.position.copy(camera.position); // 유영해도 배경이 따라옴
   }
+  const tE = ease01(uT);
+  glowsA.forEach(s=>s.material.opacity=.14*(1-tE));
+  glowsB.forEach(s=>s.material.opacity=.16*tE);
   updateLines(); projectLabels();
   if(composer){
     if(bloomPass) bloomPass.strength = 1.1*(1-ease01(uT)); // 백우주(종이)에선 블룸 끔
@@ -768,10 +904,11 @@ addEventListener('resize',resize);
   document.getElementById('loading').remove();
   renderer.setClearColor(BG_DARK);
   buildNebula();
+  buildGlows();
   starPoints = buildPoints(STARS,1);
   buildDust();
   setupComposer();
-  makeLabels(); makePersistentLabels(); resize(); applyCam();
+  makeLabels(); makePersistentLabels(); buildFilters(); resize(); applyCam();
   requestAnimationFrame(animate);
   startAtTrending(); // 시작 = 현재 트렌딩 1위 모델로 플라이인
 })();
