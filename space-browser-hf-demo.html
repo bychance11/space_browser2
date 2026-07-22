@@ -12,7 +12,6 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/objects/Lensflare.js"></script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
@@ -213,7 +212,7 @@ void main(){
   vec3 p = mix(position, posB, s) + arc*sin(3.14159*s)*d*0.28;
   vColor = mix(colA, colB, s); vSeed = seed; vSize = size;
   vec4 mv = modelViewMatrix*vec4(p,1.0);
-  float tw = 1.0 + 0.18*sin(uTime*2.2 + seed*80.0);
+  float tw = 1.0 + 0.18*sin(uTime*2.2 + seed*80.0)*(size>9.0 ? 0.0 : 1.0); // 행성은 반짝이지 않음
   gl_PointSize = min(size*tw*uPix*140.0/max(-mv.z,1.0), 700.0);
   gl_Position = projectionMatrix*mv;
 }`;
@@ -222,17 +221,29 @@ uniform float uAlpha; varying vec3 vColor; varying float vSeed; varying float vS
 void main(){
   vec2 uv = gl_PointCoord - 0.5;
   float d = length(uv);
-  float core = exp(-d*d*36.0);              // 뜨거운 중심핵
-  float glow = exp(-d*4.2)*0.5;             // 부드러운 광륜
-  float spikes = 0.0;
-  if(vSize > 9.0){                          // 큰 별만 회절 스파이크(십자 빛줄기)
-    float s1 = exp(-abs(uv.x)*28.0)*exp(-abs(uv.y)*5.0);
-    float s2 = exp(-abs(uv.y)*28.0)*exp(-abs(uv.x)*5.0);
-    spikes = (s1+s2)*smoothstep(0.5,0.05,d)*0.85;
+  vec3 col; float a;
+  if(vSize > 9.0){
+    // ===== 거대별 = 목성형 행성: 차분한 몸체 + 밝은 대기 테두리 =====
+    float R = 0.34;
+    float body = smoothstep(R, R-0.012, d);                       // 행성 원반
+    float bands = 0.72 + 0.28*sin(uv.y*24.0 + vSeed*40.0 + sin(uv.x*7.0+vSeed*9.0)*0.7); // 위도 줄무늬
+    float zsq = max(0.0, R*R - d*d);
+    vec3 nrm = normalize(vec3(uv, sqrt(zsq)+0.001));
+    float sh = clamp(0.25 + 0.85*dot(nrm, normalize(vec3(-0.45,0.4,0.8))), 0.0, 1.0);   // 구면 음영
+    vec3 bodyCol = vColor * bands * sh * 0.5;                     // 어둡고 차분 (블룸 임계 아래)
+    float rim  = exp(-abs(d-R)*30.0);                             // 얇고 밝은 대기 테두리
+    float halo = exp(-(d-R)*8.0) * step(R, d) * 0.18;             // 바깥 옅은 대기광
+    vec3 rimCol = (vColor*1.5 + vec3(0.55)) * rim;
+    col = bodyCol*body + rimCol + vColor*halo;
+    a = max(body, rim*0.9 + halo) * uAlpha;
+  } else {
+    // ===== 일반 별 =====
+    float core = exp(-d*d*36.0);
+    float glow = exp(-d*4.2)*0.5;
+    a = clamp(core+glow, 0.0, 1.0)*uAlpha;
+    col = vColor*(0.8+core*1.1) + vec3(1.0)*core*0.4;
   }
-  float a = clamp(core+glow+spikes, 0.0, 1.0)*uAlpha;
   a *= smoothstep(0.5, 0.42, d); // 스프라이트 사각 경계에서 완전 소멸 → 네모 박스 제거
-  vec3 col = vColor*(0.8+core*1.1) + vec3(1.0)*core*0.4;
   gl_FragColor = vec4(col, a);
   if(a < 0.02) discard;
 }`;
@@ -312,40 +323,6 @@ function buildNebula(){
       }`});
   nebulaMesh = new THREE.Mesh(new THREE.SphereGeometry(1900,48,48), nebulaMat);
   nebulaMesh.frustumCulled=false; nebulaMesh.renderOrder=-1; scene.add(nebulaMesh);
-}
-
-/* ================= 거대별 렌즈플레어 (three.js 예제 Lensflare, MIT) ================= */
-let flares=[];
-const _fv = new THREE.Vector3();
-function flareTexture(kind){
-  const s = kind==='main'? 256:128;
-  const c = document.createElement('canvas'); c.width=c.height=s;
-  const x = c.getContext('2d'), g = x.createRadialGradient(s/2,s/2,0,s/2,s/2,s/2);
-  if(kind==='main'){
-    g.addColorStop(0,'rgba(255,255,255,1)'); g.addColorStop(.2,'rgba(255,242,220,.5)');
-    g.addColorStop(.55,'rgba(160,185,255,.12)'); g.addColorStop(1,'rgba(0,0,0,0)');
-  } else { // 링 고스트
-    g.addColorStop(0,'rgba(255,255,255,0)'); g.addColorStop(.62,'rgba(255,255,255,.16)');
-    g.addColorStop(.78,'rgba(255,255,255,.34)'); g.addColorStop(.92,'rgba(255,255,255,0)');
-    g.addColorStop(1,'rgba(0,0,0,0)');
-  }
-  x.fillStyle=g; x.fillRect(0,0,s,s);
-  return new THREE.CanvasTexture(c);
-}
-function createFlares(){ // 각 은하 트렌딩 1위(흑·백 어느 쪽이든)에 렌즈플레어
-  if(!THREE.Lensflare) return;
-  const tMain=flareTexture('main'), tGhost=flareTexture('ghost');
-  STARS.filter(m=>m.rankA===0 || m.rankB===0).forEach(m=>{
-    const fl = new THREE.Lensflare();
-    const col = m.colA.clone().lerp(new THREE.Color(1,1,1), .55);
-    fl.addElement(new THREE.LensflareElement(tMain, 320, 0, col));
-    fl.addElement(new THREE.LensflareElement(tGhost, 60, .5, col));
-    fl.addElement(new THREE.LensflareElement(tGhost, 105, .78, m.colA));
-    fl.addElement(new THREE.LensflareElement(tGhost, 48, 1.15, col));
-    const holder = new THREE.Object3D();
-    holder.add(fl); scene.add(holder);
-    flares.push({m, holder});
-  });
 }
 
 /* ================= 블룸 후처리 (three.js 예제, MIT) ================= */
@@ -708,7 +685,6 @@ function animate(now){
     nebulaMat.uniforms.uT.value=uT; nebulaMat.uniforms.uTime.value=now*.001;
     nebulaMesh.position.copy(camera.position); // 유영해도 배경이 따라옴
   }
-  flares.forEach(f=>{ f.holder.position.copy(starPos(f.m, uT, _fv)); }); // 플레어가 별을 따라감
   updateLines(); projectLabels();
   if(composer){
     if(bloomPass) bloomPass.strength = 1.1*(1-ease01(uT)); // 백우주(종이)에선 블룸 끔
@@ -731,7 +707,6 @@ addEventListener('resize',resize);
   buildNebula();
   starPoints = buildPoints(STARS,1);
   buildDust();
-  createFlares();
   setupComposer();
   makeLabels(); makePersistentLabels(); resize(); applyCam();
   requestAnimationFrame(animate);
