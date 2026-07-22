@@ -36,6 +36,15 @@
   body.light .lbl{text-shadow:0 0 6px rgba(255,255,255,.7)}
   .glbl{position:fixed; transform:translate(-50%,-50%); font-size:13px; letter-spacing:.15em; pointer-events:none; white-space:nowrap; color:var(--fg-dim); opacity:.75; z-index:4; transition:opacity 2.5s}
   .lbl.sel{font-weight:700; font-size:12.5px; color:var(--accent)}
+  .plbl{position:fixed; transform:translate(-50%,-140%); pointer-events:none; white-space:nowrap; z-index:5; color:var(--fg); text-shadow:0 0 6px rgba(0,0,0,.55)}
+  body.light .plbl{text-shadow:0 0 6px rgba(255,255,255,.75)}
+  .plbl .lk{opacity:.75; font-weight:400; font-size:.82em}
+  .p0{font-size:16.5px; font-weight:800; letter-spacing:.02em}
+  .p1{font-size:12px; font-weight:600; opacity:.78}
+  .p2{font-size:10px; opacity:.38}
+  .hoverbox{position:fixed; transform:translate(-50%,-135%); z-index:12; pointer-events:none; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:8px 11px; font-size:12.5px; line-height:1.5; max-width:340px; white-space:normal; backdrop-filter:blur(8px)}
+  .hoverbox .dim,.hoverbox .sum{color:var(--fg-dim)}
+  .hoverbox .sum{font-size:11.5px; margin-top:3px}
 </style>
 </head>
 <body class="dark">
@@ -46,7 +55,7 @@
   <button id="goBtn">탐색</button>
   <button id="modeBtn">☀ 백우주로</button>
 </div>
-<div id="hint" class="panel">드래그 회전 · 휠 줌 · 별 클릭 = 선택 | 흑=태스크 우주, 백=도메인 우주</div>
+<div id="hint" class="panel">클릭 = HF 페이지 열기 · Ctrl+클릭 = 그 별로 이동 · 마우스오버 = 정보 | 흑=태스크, 백=도메인</div>
 <div id="info" class="panel"></div>
 <div id="legend" class="panel"></div>
 
@@ -74,7 +83,7 @@ const DOMAINS = [ // 백우주(응용 도메인) 은하 — 태그/이름/README
   {key:'multi', name:'다국어',        center:[ 80, 10,-130], hue:185},
   {key:'gen',   name:'일반·범용',      center:[  0,  0,  0],  hue:30},
 ];
-const PER_TASK = 80, DUST_N = 18000, TRANS_MS = 5000;
+const PER_TASK = 50, TREND_N = 10, DUST_N = 12000, TRANS_MS = 5000;
 
 /* ================= 도메인 추론 ================= */
 function inferDomain(m){
@@ -106,8 +115,8 @@ function parseModel(raw){
     info: new Set(tags.filter(x=>!STOP.test(x))),
   };
 }
-function discPos(center, rank, n, rng){ // 은하 원반: 상위 모델일수록 중심
-  const r = 6 + 46*Math.pow(rank/Math.max(n-1,1), .72);
+function discPos(center, rank, n, rng){ // 은하 원반: 상위 모델일수록 중심 (중심부는 트렌딩 1위 자리라 비움)
+  const r = 16 + 40*Math.pow(rank/Math.max(n-1,1), .72);
   const a = rank*2.399963 + r*.05 + rng*6.28;
   return [center[0]+r*Math.cos(a), center[1]+(rng-.5)*2*(4+r*.12), center[2]+r*Math.sin(a)];
 }
@@ -118,35 +127,51 @@ const rng = mulberry(42);
 /* ================= 데이터 수집 (HF API, CORS 허용) ================= */
 let STARS = [];
 async function loadData(){
-  const results = await Promise.allSettled(TASKS.map(t=>
-    fetch(`https://huggingface.co/api/models?filter=${t.tag}&sort=downloads&limit=${PER_TASK}`).then(r=>r.json())
-  ));
-  const seen = new Set();
-  results.forEach((res,gi)=>{
+  // 다운로드 상위(구조) + 트렌딩 상위(위계)를 태스크별로 동시 수집
+  const dlQ = Promise.allSettled(TASKS.map(t=>fetch(`https://huggingface.co/api/models?filter=${t.tag}&sort=downloads&limit=${PER_TASK}`).then(r=>r.json())));
+  const trQ = Promise.allSettled(TASKS.map(t=>fetch(`https://huggingface.co/api/models?filter=${t.tag}&sort=trendingScore&limit=${TREND_N}`).then(r=>r.json())));
+  const [dlR, trR] = await Promise.all([dlQ, trQ]);
+  const byId = new Map();
+  const absorb = (res, gi)=>{
     if(res.status!=='fulfilled' || !Array.isArray(res.value)) return;
-    res.value.forEach((raw,rank)=>{
-      if(seen.has(raw.id)) return; seen.add(raw.id);
-      const m = parseModel(raw);
-      m.gA = gi; m.rankA = rank;
-      STARS.push(m);
+    res.value.forEach(raw=>{
+      let m = byId.get(raw.id);
+      if(!m){ m=parseModel(raw); m.gA=gi; m.trend=raw.trendingScore||0; m.seed=rng(); byId.set(raw.id,m); }
+      else m.trend = Math.max(m.trend, raw.trendingScore||0);
     });
-  });
+  };
+  dlR.forEach(absorb); trR.forEach(absorb);
+  STARS = [...byId.values()];
   if(STARS.length < 50) throw new Error('API 응답 부족');
-  // 도메인(백우주) 소속 + 순위
   STARS.forEach(m=>{ m.gB = DOMAINS.findIndex(d=>d.key===inferDomain(m)); });
-  DOMAINS.forEach((d,di)=>{
-    STARS.filter(m=>m.gB===di).sort((a,b)=>b.dl-a.dl).forEach((m,i,arr)=>{ m.rankB=i; m.nB=arr.length; });
-  });
-  // 좌표 2벌 + 시각 속성
-  const nA = {}; STARS.forEach(m=>nA[m.gA]=(nA[m.gA]||0)+1);
+  layoutUniverse('A'); layoutUniverse('B');
   STARS.forEach(m=>{
-    m.seed = rng();
-    m.posA = discPos(TASKS[m.gA].center, m.rankA, nA[m.gA], m.seed);
-    m.posB = discPos(DOMAINS[m.gB].center, m.rankB, m.nB, m.seed);
-    m.size = 2.2 + Math.min(1, Math.log10(m.dl+1)/8.2)*7.5;
+    m.size = starSize(m);
     m.delay = (m.gA/TASKS.length)*.34 + Math.min(m.rankA/PER_TASK,1)*.18 + m.seed*.06; // 은하별 물결 + 순위 스태거
-    m.colA = hsl(TASKS[m.gA].hue, .75, .72);   // 흑우주: 밝은 별
-    m.colB = hsl(DOMAINS[m.gB].hue, .8, .34);  // 백우주: 종이 위 잉크 별
+    m.colA = hsl(TASKS[m.gA].hue, .75, m.rankA<5?.85:.72);   // 흑우주: 밝은 별, 핫한 별은 더 밝게
+    m.colB = hsl(DOMAINS[m.gB].hue, .8, m.rankB<5?.28:.34);  // 백우주: 종이 위 잉크 별
+  });
+}
+function rankBoost(r){ return r===0? 26 : r<5? 17-1.8*r : 0; } // 1위=지구급, 2~5위=위성은하급
+function starSize(m){
+  const base = 1.5 + Math.min(1, Math.log10(m.dl+1)/8.2)*3.2;   // 일반 별은 작게(달)
+  return Math.max(base, rankBoost(m.rankA), rankBoost(m.rankB));
+}
+function layoutUniverse(which){ // 은하마다: 트렌딩 1위=중심, 2~5위=외곽 위성은하, 나머지=원반
+  const GAL = which==='A'? TASKS : DOMAINS;
+  GAL.forEach((gal,g)=>{
+    const list = STARS.filter(m=> (which==='A'?m.gA:m.gB)===g)
+                      .sort((a,b)=> (b.trend-a.trend) || (b.dl-a.dl));
+    const ang = g*2.4 + (which==='A'?0:1.3);
+    const satC = [gal.center[0]+Math.cos(ang)*68, gal.center[1]+12, gal.center[2]+Math.sin(ang)*68];
+    list.forEach((m,i)=>{
+      let p;
+      if(i===0) p = gal.center.map(v=>v+(m.seed-.5)*4);
+      else if(i<5){ const a2=i*1.57+m.seed*6.28;
+        p = [satC[0]+Math.cos(a2)*(7+i*2), satC[1]+(m.seed-.5)*8, satC[2]+Math.sin(a2)*(7+i*2)];
+      } else p = discPos(gal.center, i-5, list.length, m.seed);
+      if(which==='A'){ m.posA=p; m.rankA=i; } else { m.posB=p; m.rankB=i; }
+    });
   });
 }
 
@@ -223,7 +248,7 @@ function buildDust(){ // Tier2 개념: 실별 주변에 뿌리는 별먼지 (양
                colA:m.colA.clone().multiplyScalar(dim), colB:m.colB.clone().lerp(new THREE.Color('#f5f2ea'),.55),
                size:.8+rng()*1.4, delay:m.delay+(rng()-.5)*.08, seed:rng()});
   }
-  return buildPoints(list, .5);
+  return buildPoints(list, .35);
 }
 
 /* ================= 우주 전환 (흑↔백) ================= */
@@ -298,28 +323,70 @@ function updateLines(){
 }
 
 /* ================= 라벨 ================= */
-let starLabels=[], galaxyLabels=[];
+let starLabels=[], galaxyLabels=[], pLabels=[], selectionIds=new Set();
+function addDiv(cls, html){ const e=document.createElement('div'); e.className=cls; e.innerHTML=html; document.body.appendChild(e); return e; }
+function fmtK(n){ return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'k':''+n; }
 function makeLabels(){
-  TASKS.forEach((t,i)=>galaxyLabels.push({uni:0, pos:new THREE.Vector3(...t.center), el:addDiv('glbl',t.name)}));
-  DOMAINS.forEach((d,i)=>galaxyLabels.push({uni:1, pos:new THREE.Vector3(...d.center), el:addDiv('glbl',d.name)}));
+  TASKS.forEach(t=>galaxyLabels.push({uni:0, pos:new THREE.Vector3(...t.center), el:addDiv('glbl',t.name)}));
+  DOMAINS.forEach(d=>galaxyLabels.push({uni:1, pos:new THREE.Vector3(...d.center), el:addDiv('glbl',d.name)}));
   galaxyLabels.forEach(l=>{ l.el.style.opacity = l.uni===0? .75:0; });
 }
-function addDiv(cls, txt){ const e=document.createElement('div'); e.className=cls; e.textContent=txt; document.body.appendChild(e); return e; }
+function makePersistentLabels(){ // 주요 별 상시 라벨: 클수록 크고 진하게, 하위 티어는 없음
+  const done=new Set();
+  STARS.forEach(m=>{
+    const r=Math.min(m.rankA,m.rankB);
+    if(r>=5) return;
+    done.add(m.id);
+    pLabels.push({m, el:addDiv(r===0?'plbl p0':'plbl p1', `${m.id.split('/').pop()} <span class="lk">♥${fmtK(m.likes)}</span>`)});
+  });
+  TASKS.forEach((t,gi)=>{ // 은하별 다운로드 상위 3개는 흐린 라벨
+    STARS.filter(m=>m.gA===gi&&!done.has(m.id)).sort((a,b)=>b.dl-a.dl).slice(0,3)
+         .forEach(m=>{done.add(m.id); pLabels.push({m, el:addDiv('plbl p2', m.id.split('/').pop())});});
+  });
+}
 function syncStarLabels(){
-  starLabels.forEach(l=>l.el.remove()); starLabels=[];
+  starLabels.forEach(l=>l.el.remove()); starLabels=[]; selectionIds=new Set();
   if(!selected) return;
+  selectionIds.add(selected.id);
   starLabels.push({m:selected, el:addDiv('lbl sel', selected.id)});
-  related.forEach(r=>starLabels.push({m:r.m, el:addDiv('lbl', r.m.id.split('/').pop())}));
+  related.forEach(r=>{ selectionIds.add(r.m.id); starLabels.push({m:r.m, el:addDiv('lbl', r.m.id.split('/').pop())}); });
+}
+/* ---- 마우스오버: 확대 라벨 + ♥ + README 1줄 요약(지연 로드) ---- */
+const hoverEl = addDiv('hoverbox',''); hoverEl.style.display='none';
+let hoverStar=null; const sumCache={};
+async function fetchSummary(m){
+  if(m.id in sumCache) return sumCache[m.id];
+  sumCache[m.id]='';
+  try{
+    const t = await (await fetch(`https://huggingface.co/${m.id}/raw/main/README.md`)).text();
+    const body = t.replace(/^---[\s\S]*?---/,'');
+    const line = body.split('\n').map(s=>s.trim()).find(s=>s.length>25 && !/^[#!<\[\->`|*]/.test(s));
+    sumCache[m.id] = line? line.replace(/[*_`#\[\]]/g,'').slice(0,90) : '';
+  }catch(e){}
+  return sumCache[m.id];
+}
+function setHover(m){
+  if(hoverStar===m) return;
+  hoverStar=m;
+  canvas.style.cursor = m? 'pointer':'default';
+  if(!m){ hoverEl.style.display='none'; return; }
+  hoverEl.style.display='block';
+  hoverEl.innerHTML = `<b>${m.id}</b><br><span class="dim">♥ ${m.likes.toLocaleString()} · ⬇ ${m.dl.toLocaleString()} · ${TASKS[m.gA].name}</span><div class="sum">…</div>`;
+  fetchSummary(m).then(s=>{ if(hoverStar===m) hoverEl.querySelector('.sum').textContent = s || '(README 요약 없음)'; });
 }
 function projectLabels(){
-  const w=innerWidth, h=innerHeight;
-  const place=(el,p)=>{ _v.copy(p).project(camera);
-    const vis=_v.z<1 && Math.abs(_v.x)<1.1 && Math.abs(_v.y)<1.1;
+  const w=innerWidth, h=innerHeight, tmp=new THREE.Vector3();
+  const place=(el,p,dy)=>{ _v.copy(p).project(camera);
+    const vis=_v.z<1 && Math.abs(_v.x)<1.15 && Math.abs(_v.y)<1.15;
     el.style.display=vis?'block':'none';
-    if(vis){ el.style.left=(_v.x*.5+.5)*w+'px'; el.style.top=(-_v.y*.5+.5)*h+'px'; } };
-  const tmp=new THREE.Vector3();
+    if(vis){ el.style.left=(_v.x*.5+.5)*w+'px'; el.style.top=((-_v.y*.5+.5)*h+(dy||0))+'px'; } };
   starLabels.forEach(l=>place(l.el, starPos(l.m,uT,tmp)));
+  pLabels.forEach(l=>{
+    if(selectionIds.has(l.m.id) || l.m===hoverStar){ l.el.style.display='none'; return; }
+    place(l.el, starPos(l.m,uT,tmp));
+  });
   galaxyLabels.forEach(l=>place(l.el,l.pos));
+  if(hoverStar) place(hoverEl, starPos(hoverStar,uT,tmp), -8);
 }
 
 /* ================= 카메라/조작 ================= */
@@ -333,28 +400,34 @@ function applyCam(){
 }
 canvas.addEventListener('pointerdown',e=>{ drag={x:e.clientX,y:e.clientY,moved:false}; });
 addEventListener('pointermove',e=>{
-  if(!drag) return;
+  if(!drag){ setHover(pickAt(e.clientX,e.clientY)); return; }
   const dx=e.clientX-drag.x, dy=e.clientY-drag.y;
   if(Math.abs(dx)+Math.abs(dy)>4) drag.moved=true;
   sph.th-=dx*.005; sph.ph=Math.max(.15,Math.min(3.0,sph.ph-dy*.005));
   drag.x=e.clientX; drag.y=e.clientY; camAnim=null; applyCam();
 });
 addEventListener('pointerup',e=>{
-  if(drag && !drag.moved) pick(e.clientX,e.clientY);
+  if(drag && !drag.moved){
+    const m = pickAt(e.clientX,e.clientY);
+    if(m){
+      if(e.ctrlKey || e.metaKey){ select(m); syncStarLabels(); }      // Ctrl+클릭 = 그 별 중심으로 이동
+      else window.open('https://huggingface.co/'+m.id, '_blank');    // 클릭 = HF 페이지 열기
+    }
+  }
   drag=null;
 });
 canvas.addEventListener('wheel',e=>{ sph.r=Math.max(40,Math.min(1500,sph.r*(1+e.deltaY*.001))); camAnim=null; applyCam(); },{passive:true});
-function pick(px,py){
-  let best=null, bd=14;
+function pickAt(px,py){
+  let best=null, bd=15;
   const tmp=new THREE.Vector3();
   STARS.forEach(m=>{
     starPos(m,uT,tmp).project(camera);
     if(tmp.z>1) return;
     const sx=(tmp.x*.5+.5)*innerWidth, sy=(-tmp.y*.5+.5)*innerHeight;
-    const d=Math.hypot(sx-px,sy-py) - m.size*.4;
+    const d=Math.hypot(sx-px,sy-py) - m.size*.5;
     if(d<bd){ bd=d; best=m; }
   });
-  if(best){ select(best); syncStarLabels(); }
+  return best;
 }
 function flyTo(m){
   const to = starPos(m, mode, new THREE.Vector3());
@@ -366,10 +439,10 @@ function placeExternal(m){ // 수집 목록에 없는 모델을 계보 가문 �
   const parent = STARS.find(x=>x.id===m.family || x.family===m.family);
   m.gA = Math.max(0, TASKS.findIndex(t=>t.tag===m.pipe));
   m.gB = DOMAINS.findIndex(d=>d.key===inferDomain(m));
-  m.seed=rng(); m.rankA=PER_TASK; m.rankB=30;
-  m.posA = parent? parent.posA.map(v=>v+(rng()-.5)*18) : discPos(TASKS[m.gA].center, 60, PER_TASK, m.seed);
-  m.posB = parent? parent.posB.map(v=>v+(rng()-.5)*18) : discPos(DOMAINS[m.gB].center, 30, 60, m.seed);
-  m.size = 2.2+Math.min(1,Math.log10(m.dl+1)/8.2)*7.5;
+  m.seed=rng(); m.trend=m.trend||0; m.rankA=PER_TASK; m.rankB=PER_TASK;
+  m.posA = parent? parent.posA.map(v=>v+(rng()-.5)*18) : discPos(TASKS[m.gA].center, 40, PER_TASK, m.seed);
+  m.posB = parent? parent.posB.map(v=>v+(rng()-.5)*18) : discPos(DOMAINS[m.gB].center, 25, 60, m.seed);
+  m.size = starSize(m);
   m.delay = .3+m.seed*.2;
   m.colA = hsl(TASKS[m.gA].hue,.75,.72); m.colB = hsl(DOMAINS[m.gB].hue,.8,.34);
   STARS.push(m);
@@ -386,7 +459,7 @@ async function startAtTrending(){
     const m = STARS.find(x=>x.id===raw.id) || placeExternal(parseModel(raw));
     select(m); syncStarLabels();
     const hint=document.getElementById('hint');
-    hint.innerHTML = `🔥 지금 가장 핫한 별에서 시작: <b>${m.id}</b> · 드래그 회전 · 휠 줌 · 별 클릭 = 선택`;
+    hint.innerHTML = `🔥 지금 가장 핫한 별에서 시작: <b>${m.id}</b> | 클릭=HF 열기 · Ctrl+클릭=이동 · 마우스오버=정보`;
   }catch(e){ /* 트렌딩 실패 시 그냥 전체 뷰에서 시작 */ }
 }
 
@@ -422,7 +495,7 @@ function renderInfo(m){
    <a href="https://huggingface.co/${m.id}" target="_blank">HuggingFace에서 열기 ↗</a>`;
 }
 document.getElementById('legend').innerHTML =
-  `<b>흑우주</b> 은하 = 태스크(pipeline_tag)<br><b>백우주</b> 은하 = 응용 도메인(추론)<br>별 크기 = 다운로드 · 별먼지 = Tier2 개념`;
+  `<b>거대 별</b> = 은하 트렌딩 1위 (은하 중심)<br><b>위성 은하</b> = 트렌딩 2~5위 (외곽)<br>작은 별 = 다운로드 기준 · 별먼지 = Tier2`;
 
 /* ================= 메인 루프 ================= */
 let starPoints=null;
@@ -458,7 +531,7 @@ addEventListener('resize',resize);
   renderer.setClearColor(BG_DARK);
   starPoints = buildPoints(STARS,1);
   buildDust();
-  makeLabels(); resize(); applyCam();
+  makeLabels(); makePersistentLabels(); resize(); applyCam();
   requestAnimationFrame(animate);
   startAtTrending(); // 시작 = 현재 트렌딩 1위 모델로 플라이인
 })();
