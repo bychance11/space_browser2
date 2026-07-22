@@ -5,24 +5,38 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Space Browser — HuggingFace 우주 (흑/백 전환 데모)</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<!-- three.js 공식 예제(MIT)의 블룸 후처리 — 별 빛번짐 -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
   :root{
-    --fg:#dfe6f5; --fg-dim:#8d98b5; --panel:rgba(10,14,28,.72); --line:rgba(140,160,220,.25); --accent:#7fb4ff;
+    --fg:#e9edfa; --fg-dim:#94a1c4; --panel:rgba(12,16,32,.55); --line:rgba(255,255,255,.09);
+    --accent:#8ab8ff; --glow:rgba(96,140,255,.28); --shadow:rgba(0,0,0,.35);
   }
   body.light{
-    --fg:#2b2620; --fg-dim:#8a8070; --panel:rgba(250,247,240,.78); --line:rgba(90,75,50,.25); --accent:#b0641e;
+    --fg:#2e2820; --fg-dim:#8d8271; --panel:rgba(255,253,247,.62); --line:rgba(60,45,20,.13);
+    --accent:#b0641e; --glow:rgba(190,120,40,.2); --shadow:rgba(80,60,30,.18);
   }
   *{box-sizing:border-box; margin:0}
   html,body{height:100%; overflow:hidden; background:#04060f}
-  body{font-family:'Segoe UI','Apple SD Gothic Neo',sans-serif; color:var(--fg)}
-  body, .panel, input, button{transition:color 5s, background-color 5s, border-color 5s}
+  body{font-family:'Inter','Noto Sans KR','Apple SD Gothic Neo',sans-serif; color:var(--fg)}
+  body, .panel, input, button{transition:color 5s, background-color 5s, border-color 5s, box-shadow 5s}
   #c{position:fixed; inset:0; display:block}
-  .panel{position:fixed; background:var(--panel); border:1px solid var(--line); border-radius:10px; backdrop-filter:blur(8px); padding:10px 14px}
-  #topbar{top:14px; left:50%; transform:translateX(-50%); display:flex; gap:8px; align-items:center; z-index:10}
-  #topbar input{width:min(420px,52vw); background:transparent; border:1px solid var(--line); border-radius:6px; color:var(--fg); padding:7px 10px; font-size:13px; outline:none}
+  .panel{position:fixed; background:var(--panel); border:1px solid var(--line); border-radius:16px;
+    backdrop-filter:blur(18px) saturate(1.5); -webkit-backdrop-filter:blur(18px) saturate(1.5);
+    box-shadow:0 8px 32px var(--shadow), inset 0 1px 0 rgba(255,255,255,.06); padding:10px 16px}
+  #topbar{top:16px; left:50%; transform:translateX(-50%); display:flex; gap:8px; align-items:center; z-index:10; border-radius:999px; padding:8px 10px}
+  #topbar input{width:min(420px,52vw); background:rgba(0,0,0,.001); border:1px solid var(--line); border-radius:999px; color:var(--fg); padding:8px 16px; font-size:13px; outline:none; font-family:inherit}
   #topbar input::placeholder{color:var(--fg-dim)}
-  button{background:transparent; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:7px 12px; font-size:13px; cursor:pointer}
-  button:hover{border-color:var(--accent); color:var(--accent)}
+  #topbar input:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--glow)}
+  button{background:transparent; color:var(--fg); border:1px solid var(--line); border-radius:999px; padding:8px 16px; font-size:13px; cursor:pointer; font-family:inherit; font-weight:600}
+  button:hover{border-color:var(--accent); color:var(--accent); box-shadow:0 0 18px var(--glow)}
   #modeBtn{font-weight:700; min-width:120px}
   #info{left:14px; bottom:14px; max-width:320px; font-size:12.5px; line-height:1.55; display:none; z-index:10}
   #info h3{font-size:14px; margin-bottom:4px; word-break:break-all}
@@ -30,11 +44,12 @@
   #info .dim{color:var(--fg-dim)}
   #legend{right:14px; bottom:14px; font-size:11.5px; line-height:1.7; color:var(--fg-dim); z-index:10}
   #legend b{color:var(--fg)}
-  #hint{top:64px; left:50%; transform:translateX(-50%); font-size:11.5px; color:var(--fg-dim); z-index:9; padding:5px 12px}
+  #hint{top:72px; left:50%; transform:translateX(-50%); font-size:11px; color:var(--fg-dim); z-index:9; padding:5px 14px; border-radius:999px; letter-spacing:.01em}
   #loading{position:fixed; inset:0; display:flex; flex-direction:column; gap:12px; align-items:center; justify-content:center; z-index:20; color:#9fb3dd; font-size:14px; background:#04060f}
   .lbl{position:fixed; transform:translate(-50%,-130%); font-size:11px; pointer-events:none; white-space:nowrap; color:var(--fg); text-shadow:0 0 6px rgba(0,0,0,.5); z-index:5}
   body.light .lbl{text-shadow:0 0 6px rgba(255,255,255,.7)}
-  .glbl{position:fixed; transform:translate(-50%,-50%); font-size:13px; letter-spacing:.15em; pointer-events:none; white-space:nowrap; color:var(--fg-dim); opacity:.75; z-index:4; transition:opacity 2.5s}
+  .glbl{position:fixed; transform:translate(-50%,-50%); font-size:12px; font-weight:600; letter-spacing:.35em; pointer-events:none; white-space:nowrap; color:var(--fg-dim); opacity:.7; z-index:4; transition:opacity 2.5s; text-transform:uppercase}
+  .glbl::after{content:''; display:block; margin:4px auto 0; width:60%; height:1px; background:linear-gradient(90deg,transparent,var(--fg-dim),transparent); opacity:.4}
   .lbl.sel{font-weight:700; font-size:12.5px; color:var(--accent)}
   .plbl{position:fixed; transform:translate(-50%,-140%); pointer-events:none; white-space:nowrap; z-index:5; color:var(--fg); text-shadow:0 0 6px rgba(0,0,0,.55)}
   body.light .plbl{text-shadow:0 0 6px rgba(255,255,255,.75)}
@@ -188,27 +203,36 @@ const VSH = `
 attribute vec3 posB; attribute vec3 colA; attribute vec3 colB;
 attribute float size; attribute float delay; attribute float seed;
 uniform float uT; uniform float uTime; uniform float uPix;
-varying vec3 vColor; varying float vSeed;
+varying vec3 vColor; varying float vSeed; varying float vSize;
 void main(){
   float k = clamp((uT - delay)/0.4, 0.0, 1.0);
   float s = k*k*(3.0-2.0*k);
   vec3 arc = normalize(vec3(sin(seed*12.9), cos(seed*7.7), sin(seed*5.3+1.7)));
   float d = distance(position, posB);
   vec3 p = mix(position, posB, s) + arc*sin(3.14159*s)*d*0.28;
-  vColor = mix(colA, colB, s); vSeed = seed;
+  vColor = mix(colA, colB, s); vSeed = seed; vSize = size;
   vec4 mv = modelViewMatrix*vec4(p,1.0);
   float tw = 1.0 + 0.18*sin(uTime*2.2 + seed*80.0);
   gl_PointSize = min(size*tw*uPix*140.0/max(-mv.z,1.0), 700.0);
   gl_Position = projectionMatrix*mv;
 }`;
 const FSH = `
-uniform float uAlpha; varying vec3 vColor; varying float vSeed;
+uniform float uAlpha; varying vec3 vColor; varying float vSeed; varying float vSize;
 void main(){
-  float d = length(gl_PointCoord-0.5);
-  float a = smoothstep(0.5, 0.12, d);
-  float core = smoothstep(0.18, 0.0, d)*0.9;
-  gl_FragColor = vec4(vColor + core, a*uAlpha);
-  if(gl_FragColor.a < 0.02) discard;
+  vec2 uv = gl_PointCoord - 0.5;
+  float d = length(uv);
+  float core = exp(-d*d*36.0);              // 뜨거운 중심핵
+  float glow = exp(-d*4.2)*0.5;             // 부드러운 광륜
+  float spikes = 0.0;
+  if(vSize > 9.0){                          // 큰 별만 회절 스파이크(십자 빛줄기)
+    float s1 = exp(-abs(uv.x)*28.0)*exp(-abs(uv.y)*5.0);
+    float s2 = exp(-abs(uv.y)*28.0)*exp(-abs(uv.x)*5.0);
+    spikes = (s1+s2)*smoothstep(0.5,0.05,d)*0.85;
+  }
+  float a = clamp(core+glow+spikes, 0.0, 1.0)*uAlpha;
+  vec3 col = vColor*(0.8+core*1.1) + vec3(1.0)*core*0.4;
+  gl_FragColor = vec4(col, a);
+  if(a < 0.02) discard;
 }`;
 const materials = [];
 function makeMat(alpha){
@@ -249,6 +273,47 @@ function buildDust(){ // Tier2 개념: 실별 주변에 뿌리는 별먼지 (양
                size:.8+rng()*1.4, delay:m.delay+(rng()-.5)*.08, seed:rng()});
   }
   return buildPoints(list, .35);
+}
+
+/* ================= 성운 배경 (fBm 노이즈 셰이더) ================= */
+let nebulaMat=null, nebulaMesh=null;
+function buildNebula(){
+  nebulaMat = new THREE.ShaderMaterial({side:THREE.BackSide, depthWrite:false,
+    uniforms:{uT:{value:0}, uTime:{value:0}},
+    vertexShader:`varying vec3 vP; void main(){vP=normalize(position); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
+    fragmentShader:`
+      varying vec3 vP; uniform float uT; uniform float uTime;
+      float h(vec3 p){return fract(sin(dot(p,vec3(127.1,311.7,74.7)))*43758.5453);}
+      float n(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
+        return mix(mix(mix(h(i),h(i+vec3(1,0,0)),f.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),f.x),f.y),
+                   mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),f.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),f.x),f.y),f.z);}
+      float fbm(vec3 p){float v=0.,a=.5;for(int i=0;i<4;i++){v+=a*n(p);p*=2.13;a*=.5;}return v;}
+      void main(){
+        float f1=fbm(vP*3.2+uTime*.006);
+        float f2=fbm(vP*6.5-uTime*.004+13.7);
+        vec3 dark = vec3(.010,.016,.045)
+          + vec3(.11,.05,.24)*pow(f1,2.2)     // 보랏빛 성운
+          + vec3(.02,.09,.15)*pow(f2,2.6);    // 청록 가스
+        vec3 light = vec3(.965,.950,.918)
+          - vec3(.055,.045,.02)*pow(f1,2.0)*.8  // 종이 위 옅은 얼룩
+          - vec3(.025)*pow(f2,2.5);
+        float t=uT*uT*(3.-2.*uT);
+        gl_FragColor = vec4(mix(dark,light,t),1.);
+      }`});
+  nebulaMesh = new THREE.Mesh(new THREE.SphereGeometry(1900,48,48), nebulaMat);
+  nebulaMesh.frustumCulled=false; nebulaMesh.renderOrder=-1; scene.add(nebulaMesh);
+}
+
+/* ================= 블룸 후처리 (three.js 예제, MIT) ================= */
+let composer=null, bloomPass=null;
+function setupComposer(){
+  try{
+    if(!THREE.EffectComposer || !THREE.UnrealBloomPass) return;
+    composer = new THREE.EffectComposer(renderer);
+    composer.addPass(new THREE.RenderPass(scene, camera));
+    bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), 1.1, 0.55, 0.8);
+    composer.addPass(bloomPass);
+  }catch(e){ composer=null; }
 }
 
 /* ================= 우주 전환 (흑↔백) ================= */
@@ -595,11 +660,19 @@ function animate(now){
     applyCam(); if(k>=1) camAnim=null;
   }
   materials.forEach(m=>{ m.uniforms.uT.value=uT; m.uniforms.uTime.value=now*.001; });
+  if(nebulaMat){
+    nebulaMat.uniforms.uT.value=uT; nebulaMat.uniforms.uTime.value=now*.001;
+    nebulaMesh.position.copy(camera.position); // 유영해도 배경이 따라옴
+  }
   updateLines(); projectLabels();
-  renderer.render(scene,camera);
+  if(composer){
+    if(bloomPass) bloomPass.strength = 1.1*(1-ease01(uT)); // 백우주(종이)에선 블룸 끔
+    composer.render();
+  } else renderer.render(scene,camera);
 }
 function resize(){
   renderer.setSize(innerWidth,innerHeight);
+  if(composer) composer.setSize(innerWidth,innerHeight);
   camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
 }
 addEventListener('resize',resize);
@@ -610,8 +683,10 @@ addEventListener('resize',resize);
   catch(e){ document.getElementById('loadMsg').textContent='HF API 접속 실패 — 네트워크를 확인하세요'; return; }
   document.getElementById('loading').remove();
   renderer.setClearColor(BG_DARK);
+  buildNebula();
   starPoints = buildPoints(STARS,1);
   buildDust();
+  setupComposer();
   makeLabels(); makePersistentLabels(); resize(); applyCam();
   requestAnimationFrame(animate);
   startAtTrending(); // 시작 = 현재 트렌딩 1위 모델로 플라이인
