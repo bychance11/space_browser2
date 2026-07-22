@@ -163,6 +163,7 @@ async function loadData(){
   layoutUniverse('A'); layoutUniverse('B');
   STARS.forEach(m=>{
     m.planet = (m.rankA<5 || m.rankB<5)? 1:0; // 행성 = 트렌딩 순위 (크기와 무관)
+    m.heat = m.planet? Math.max(0, 1 - Math.min(m.rankA, m.rankB)*0.19) : 0; // 1위=1.0 → 5위=0.24
     m.size = starSize(m);
     m.delay = (m.gA/TASKS.length)*.34 + Math.min(m.rankA/PER_TASK,1)*.18 + m.seed*.06; // 은하별 물결 + 순위 스태거
     m.colA = hsl(TASKS[m.gA].hue, .75, m.rankA<5?.85:.72);   // 흑우주: 밝은 별, 핫한 별은 더 밝게
@@ -205,23 +206,23 @@ const target = new THREE.Vector3(0,0,0);
 
 const VSH = `
 attribute vec3 posB; attribute vec3 colA; attribute vec3 colB;
-attribute float size; attribute float delay; attribute float seed; attribute float planet;
+attribute float size; attribute float delay; attribute float seed; attribute float planet; attribute float heat;
 uniform float uT; uniform float uTime; uniform float uPix;
-varying vec3 vColor; varying float vSeed; varying float vSize; varying float vPlanet;
+varying vec3 vColor; varying float vSeed; varying float vSize; varying float vPlanet; varying float vHeat;
 void main(){
   float k = clamp((uT - delay)/0.4, 0.0, 1.0);
   float s = k*k*(3.0-2.0*k);
   vec3 arc = normalize(vec3(sin(seed*12.9), cos(seed*7.7), sin(seed*5.3+1.7)));
   float d = distance(position, posB);
   vec3 p = mix(position, posB, s) + arc*sin(3.14159*s)*d*0.28;
-  vColor = mix(colA, colB, s); vSeed = seed; vSize = size; vPlanet = planet;
+  vColor = mix(colA, colB, s); vSeed = seed; vSize = size; vPlanet = planet; vHeat = heat;
   vec4 mv = modelViewMatrix*vec4(p,1.0);
   float tw = 1.0 + 0.18*sin(uTime*2.2 + seed*80.0)*(1.0-planet); // 행성은 반짝이지 않음
   gl_PointSize = min(size*tw*uPix*140.0/max(-mv.z,1.0), 700.0);
   gl_Position = projectionMatrix*mv;
 }`;
 const FSH = `
-uniform float uAlpha; varying vec3 vColor; varying float vSeed; varying float vSize; varying float vPlanet;
+uniform float uAlpha; varying vec3 vColor; varying float vSeed; varying float vSize; varying float vPlanet; varying float vHeat;
 void main(){
   vec2 uv = gl_PointCoord - 0.5;
   float d = length(uv);
@@ -235,11 +236,15 @@ void main(){
     vec3 nrm = normalize(vec3(uv, sqrt(zsq)+0.001));
     float sh = clamp(0.25 + 0.85*dot(nrm, normalize(vec3(-0.45,0.4,0.8))), 0.0, 1.0);   // 구면 음영
     vec3 bodyCol = vColor * bands * sh * 0.5;                     // 어둡고 차분 (블룸 임계 아래)
-    float rim  = exp(-abs(d-R)*30.0);                             // 얇고 밝은 대기 테두리
-    float halo = exp(-(d-R)*8.0) * step(R, d) * 0.18;             // 바깥 옅은 대기광
-    vec3 rimCol = (vColor*1.5 + vec3(0.55)) * rim;
+    // 대기 림: 열기(트렌딩 순위)에 따라 두께·밝기·대기광이 달라짐 + 시드 지터로 개체차
+    float jit  = 0.85 + 0.3*fract(vSeed*7.31);
+    float w    = mix(70.0, 17.0, vHeat) * jit;                    // 핫할수록 넓고 부드러운 대기
+    float rim  = exp(-abs(d-R)*w);
+    float rimB = mix(0.35, 1.0, vHeat) * jit;                     // 핫할수록 밝게
+    vec3 rimCol = (vColor*mix(0.8,1.6,vHeat) + vec3(mix(0.12,0.6,vHeat))) * rim * rimB;
+    float halo = exp(-(d-R)*mix(15.0,6.0,vHeat)) * step(R, d) * mix(0.03,0.3,vHeat);
     col = bodyCol*body + rimCol + vColor*halo;
-    a = max(body, rim*0.9 + halo) * uAlpha;
+    a = max(body, rim*rimB*0.9 + halo) * uAlpha;
   } else {
     // ===== 일반 별 (중간 항성은 회절 스파이크) =====
     float core = exp(-d*d*36.0);
@@ -268,11 +273,11 @@ function makeMat(alpha){
 function buildPoints(list, alpha){
   const n = list.length, g = new THREE.BufferGeometry();
   const pA=new Float32Array(n*3), pB=new Float32Array(n*3), cA=new Float32Array(n*3), cB=new Float32Array(n*3);
-  const sz=new Float32Array(n), dl=new Float32Array(n), sd=new Float32Array(n), pl=new Float32Array(n);
+  const sz=new Float32Array(n), dl=new Float32Array(n), sd=new Float32Array(n), pl=new Float32Array(n), ht=new Float32Array(n);
   list.forEach((m,i)=>{
     pA.set(m.posA,i*3); pB.set(m.posB,i*3);
     cA.set([m.colA.r,m.colA.g,m.colA.b],i*3); cB.set([m.colB.r,m.colB.g,m.colB.b],i*3);
-    sz[i]=m.size; dl[i]=m.delay; sd[i]=m.seed; pl[i]=m.planet?1:0;
+    sz[i]=m.size; dl[i]=m.delay; sd[i]=m.seed; pl[i]=m.planet?1:0; ht[i]=m.heat||0;
   });
   g.setAttribute('position',new THREE.BufferAttribute(pA,3));
   g.setAttribute('posB',new THREE.BufferAttribute(pB,3));
@@ -282,6 +287,7 @@ function buildPoints(list, alpha){
   g.setAttribute('delay',new THREE.BufferAttribute(dl,1));
   g.setAttribute('seed',new THREE.BufferAttribute(sd,1));
   g.setAttribute('planet',new THREE.BufferAttribute(pl,1));
+  g.setAttribute('heat',new THREE.BufferAttribute(ht,1));
   const pts = new THREE.Points(g, makeMat(alpha));
   pts.frustumCulled = false;
   scene.add(pts); return pts;
