@@ -369,17 +369,19 @@ function buildPoints(list, alpha){
   pts.frustumCulled = false;
   scene.add(pts); return pts;
 }
+let dustPoints=null, DUST=[];
 function buildDust(){ // Tier2 개념: 실별 주변에 뿌리는 별먼지 (양쪽 좌표 모두 실별 기준 지터)
-  const list=[];
+  DUST=[];
   for(let i=0;i<DUST_N;i++){
     const m = STARS[(rng()*STARS.length)|0], j=()=> (rng()-.5)*26;
     const dim = .25+rng()*.3;
-    list.push({posA:[m.posA[0]+j(),m.posA[1]+j()*.5,m.posA[2]+j()],
+    DUST.push({posA:[m.posA[0]+j(),m.posA[1]+j()*.5,m.posA[2]+j()],
                posB:[m.posB[0]+j(),m.posB[1]+j()*.5,m.posB[2]+j()],
                colA:m.colA.clone().multiplyScalar(dim), colB:m.colB.clone().lerp(new THREE.Color('#f5f2ea'),.55),
-               size:.8+rng()*1.4, delay:m.delay+(rng()-.5)*.08, seed:rng()});
+               size:.8+rng()*1.4, delay:m.delay+(rng()-.5)*.08, seed:rng(), src:m});
   }
-  return buildPoints(list, .35);
+  dustPoints = buildPoints(DUST, .35);
+  return dustPoints;
 }
 
 /* ================= 성운 배경 (fBm 노이즈 셰이더) ================= */
@@ -490,7 +492,7 @@ function relScore(a,b){
 }
 function select(m){
   selected = m;
-  related = STARS.filter(x=>x!==m).map(x=>({m:x, s:relScore(m,x)}))
+  related = STARS.filter(x=>x!==m && x.visible!==false).map(x=>({m:x, s:relScore(m,x)}))
                  .filter(x=>x.s>0).sort((a,b)=>b.s-a.s).slice(0,10);
   rebuildLines(); renderInfo(m); renderRelated(); flyTo(m);
 }
@@ -574,9 +576,13 @@ let starLabels=[], galaxyLabels=[], pLabels=[], selectionIds=new Set();
 function addDiv(cls, html){ const e=document.createElement('div'); e.className=cls; e.innerHTML=html; document.body.appendChild(e); return e; }
 function fmtK(n){ return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'k':''+n; }
 function makeLabels(){
-  TASKS.forEach(t=>galaxyLabels.push({uni:0, pos:new THREE.Vector3(...t.center), el:addDiv('glbl',t.name)}));
-  DOMAINS.forEach(d=>galaxyLabels.push({uni:1, pos:new THREE.Vector3(...d.center), el:addDiv('glbl',d.name)}));
+  TASKS.forEach((t,i)=>galaxyLabels.push({uni:0, gi:i, pos:new THREE.Vector3(...t.center), el:addDiv('glbl',t.name)}));
+  DOMAINS.forEach((d,i)=>galaxyLabels.push({uni:1, gi:i, pos:new THREE.Vector3(...d.center), el:addDiv('glbl',d.name)}));
   galaxyLabels.forEach(l=>{ l.el.style.opacity = l.uni===0? .75:0; });
+}
+function galaxyLabelHidden(l){
+  if(!activeGalaxy) return false;
+  return !((activeGalaxy.uni==='A'?0:1)===l.uni && activeGalaxy.gi===l.gi);
 }
 function makePersistentLabels(){ // 주요 별 상시 라벨: 클수록 크고 진하게, 하위 티어는 없음
   const done=new Set();
@@ -632,7 +638,7 @@ function projectLabels(){
     if(selectionIds.has(l.m.id) || l.m===hoverStar || l.m.visible===false){ l.el.style.display='none'; return; }
     place(l.el, starPos(l.m,uT,tmp));
   });
-  galaxyLabels.forEach(l=>place(l.el,l.pos));
+  galaxyLabels.forEach(l=>{ if(galaxyLabelHidden(l)){ l.el.style.display='none'; return; } place(l.el,l.pos); });
   if(hoverStar){ // 정보 카드는 별 위치에 앵커, 화면 밖이면 가장자리에 고정(멀리 연결된 별도 바로 확인)
     _v.copy(starPos(hoverStar,uT,tmp)).project(camera);
     if(_v.z<1){
@@ -783,7 +789,11 @@ document.getElementById('legendSec').innerHTML =
   `<b>행성</b> = 트렌딩 1~5위 (중심·위성은하)<br><b>중간 항성</b>(십자빛) = 다운로드·좋아요 상위<br>작은 별 = 항성 중력에 잡힌 위성 · 별먼지 = Tier2`;
 
 /* ================= 좌측 필터 ================= */
-let activeTags = new Set();
+let activeTags = new Set(), activeGalaxy = null; // {uni:'A'|'B', gi}
+let glowFA = TASKS.map(()=>1), glowFB = DOMAINS.map(()=>1);
+function inGalaxy(m){
+  return !activeGalaxy || (activeGalaxy.uni==='A'? m.gA===activeGalaxy.gi : m.gB===activeGalaxy.gi);
+}
 function paramsOf(m){ // 모델명에서 파라미터 수 추정 (7b, 0.6B, 125m 등)
   const s = m.id.split('/').pop().toLowerCase();
   let x = s.match(/(\d+(?:\.\d+)?)b(?![a-z0-9])/);
@@ -804,13 +814,32 @@ function applyFilters(){
     const g = estGB(m);
     const passMem = !memV || g===null || g<=memV;
     let passTag = true; activeTags.forEach(t=>{ if(!m.info.has(t)) passTag=false; });
-    m.visible = passMem && passTag;
+    m.visible = inGalaxy(m) && passMem && passTag;
   });
   if(starPoints){
     const arr = starPoints.geometry.attributes.vis.array;
     STARS.forEach((m,i)=>arr[i]=m.visible?1:0);
     starPoints.geometry.attributes.vis.needsUpdate = true;
   }
+  if(dustPoints){ // 별먼지도 소속 별을 따라 숨김
+    const arr = dustPoints.geometry.attributes.vis.array;
+    DUST.forEach((d,i)=>arr[i]=d.src.visible?1:0);
+    dustPoints.geometry.attributes.vis.needsUpdate = true;
+  }
+  glowFA = TASKS.map((t,i)=> !activeGalaxy? 1 : (activeGalaxy.uni==='A'&&activeGalaxy.gi===i? 1 : .06));
+  glowFB = DOMAINS.map((d,i)=> !activeGalaxy? 1 : (activeGalaxy.uni==='B'&&activeGalaxy.gi===i? 1 : .06));
+}
+function buildTagChips(){ // 태그 칩: 현재 은하 범위의 정보성 태그 빈도 상위 24개
+  const box = document.getElementById('tagChips'); box.innerHTML='';
+  const freq = {};
+  STARS.filter(inGalaxy).forEach(m=>m.info.forEach(t=>{ if(!/^[a-z]{2}$/.test(t)) freq[t]=(freq[t]||0)+1; }));
+  Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,24).forEach(([t,c])=>{
+    const el = document.createElement('span'); el.className='chip'+(activeTags.has(t)?' on':''); el.textContent=`${t} ${c}`;
+    el.onclick = ()=>{ el.classList.toggle('on');
+      el.classList.contains('on')? activeTags.add(t) : activeTags.delete(t);
+      applyFilters(); };
+    box.appendChild(el);
+  });
 }
 function buildFilters(){
   const gs = document.getElementById('galaxySel');
@@ -819,26 +848,19 @@ function buildFilters(){
   const og2 = document.createElement('optgroup'); og2.label='백우주 · 도메인';
   DOMAINS.forEach((d,i)=>{ const o=document.createElement('option'); o.value='B'+i; o.textContent=d.name; og2.appendChild(o); });
   gs.appendChild(og1); gs.appendChild(og2);
-  gs.onchange = ()=>{ // 은하 선택 → 그 은하 트렌딩 1위(중심 항성) 기준으로 재중심
-    const v = gs.value; if(!v) return;
+  gs.onchange = ()=>{ // 은하 선택 = 필터: 그 은하 별만 남기고, 트렌딩 1위 중심으로 재중심 + 태그 재계산
+    const v = gs.value;
+    if(!v){ activeGalaxy=null; activeTags.clear(); applyFilters(); buildTagChips(); return; }
     const uni = v[0], gi = +v.slice(1);
+    activeGalaxy = {uni, gi};
+    activeTags.clear(); // 은하가 바뀌면 태그 조건 초기화
     if((uni==='B') !== (mode===1)) switchMode(); // 필요하면 우주 전환부터
+    applyFilters(); buildTagChips();
     const m = STARS.find(x=> uni==='A'? (x.gA===gi && x.rankA===0) : (x.gB===gi && x.rankB===0));
     if(m){ select(m); syncStarLabels(); }
   };
   document.getElementById('memSel').onchange = applyFilters;
-  // 태그 칩: 정보성 태그 빈도 상위 24개
-  const freq = {};
-  STARS.forEach(m=>m.info.forEach(t=>{ if(!/^[a-z]{2}$/.test(t)) freq[t]=(freq[t]||0)+1; }));
-  const top = Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,24);
-  const box = document.getElementById('tagChips');
-  top.forEach(([t,c])=>{
-    const el = document.createElement('span'); el.className='chip'; el.textContent=`${t} ${c}`;
-    el.onclick = ()=>{ el.classList.toggle('on');
-      el.classList.contains('on')? activeTags.add(t) : activeTags.delete(t);
-      applyFilters(); };
-    box.appendChild(el);
-  });
+  buildTagChips();
 }
 
 /* ================= 연관 별 리스트 패널 ================= */
@@ -882,8 +904,8 @@ function animate(now){
     nebulaMesh.position.copy(camera.position); // 유영해도 배경이 따라옴
   }
   const tE = ease01(uT);
-  glowsA.forEach(s=>s.material.opacity=.14*(1-tE));
-  glowsB.forEach(s=>s.material.opacity=.16*tE);
+  glowsA.forEach((s,i)=>s.material.opacity=.14*(1-tE)*glowFA[i]);
+  glowsB.forEach((s,i)=>s.material.opacity=.16*tE*glowFB[i]);
   updateLines(); projectLabels();
   if(composer){
     if(bloomPass) bloomPass.strength = 1.1*(1-ease01(uT)); // 백우주(종이)에선 블룸 끔
